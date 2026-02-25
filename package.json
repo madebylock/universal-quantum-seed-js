@@ -1,0 +1,48 @@
+{
+  "name": "universal-quantum-seed",
+  "version": "1.0.0",
+  "description": "The world's first quantum-safe visual + multilingual seed phrase system. Pure JavaScript, zero dependencies.",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "seed.js",
+    "words.js",
+    "crypto/",
+    "data/languages/",
+    "data/visuals/",
+    "tools/",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "compile": "python tools/compile-js.py"
+  },
+  "keywords": [
+    "quantum",
+    "seed",
+    "mnemonic",
+    "post-quantum",
+    "cryptography",
+    "ml-dsa",
+    "ml-kem",
+    "slh-dsa",
+    "fips-203",
+    "fips-204",
+    "fips-205",
+    "sha3",
+    "keccak",
+    "multilingual",
+    "visual",
+    "wallet",
+    "entropy"
+  ],
+  "author": "Signer.io",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nicholasgasior/universal-quantum-seed-js"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
