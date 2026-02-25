@@ -14,6 +14,7 @@ The world's first quantum-safe visual + multilingual seed phrase system.
 - **42 languages** — Write your seed in any language, recover in any other
 - **256 visual icons** — Skip words entirely and select icons
 - **Post-quantum cryptography** — ML-DSA-65, SLH-DSA-SHAKE-128s, ML-KEM-768
+- **Hybrid classical + post-quantum** — Ed25519 + ML-DSA-65, X25519 + ML-KEM-768
 - **Pure JavaScript** — SHA-2, SHA-3, HMAC, HKDF, PBKDF2, NTT — all from scratch
 - **Zero dependencies** — No npm packages required
 
@@ -52,6 +53,20 @@ const kemKp = uqs.generateQuantumKeypair(seed, "ml-kem-768", 0);
 const { ct, ss } = uqs.mlKemEncaps(kemKp.pk);
 const ss2 = uqs.mlKemDecaps(kemKp.sk, ct);
 // ss and ss2 are identical 32-byte shared secrets
+
+// Hybrid Ed25519 + ML-DSA-65 (classical + post-quantum signature)
+const hybridSigKp = uqs.generateQuantumKeypair(seed, "hybrid-dsa-65", 0);
+// hybridSigKp.sk = 4096 bytes, hybridSigKp.pk = 1984 bytes
+const hybridSig = uqs.hybridDsaSign(msg, hybridSigKp.sk);
+const hybridValid = uqs.hybridDsaVerify(msg, hybridSig, hybridSigKp.pk);
+// hybridValid === true (both Ed25519 AND ML-DSA-65 must verify)
+
+// Hybrid X25519 + ML-KEM-768 (classical + post-quantum key exchange)
+const hybridKemKp = uqs.generateQuantumKeypair(seed, "hybrid-kem-768", 0);
+// hybridKemKp.pk = 1216 bytes, hybridKemKp.sk = 2432 bytes
+const { ct: hCt, ss: hSs } = uqs.hybridKemEncaps(hybridKemKp.pk);
+const hSs2 = uqs.hybridKemDecaps(hybridKemKp.sk, hCt);
+// hSs and hSs2 are identical 32-byte shared secrets
 ```
 
 ## API
@@ -106,6 +121,41 @@ const ss2 = uqs.mlKemDecaps(kemKp.sk, ct);
 | `mlKemEncaps(ek, randomness?)` | Encapsulate (CT: 1088B, SS: 32B) |
 | `mlKemDecaps(dk, ct)` | Decapsulate (SS: 32B) |
 
+**Ed25519** (RFC 8032 — Classical Digital Signature)
+
+| Function | Description |
+|----------|-------------|
+| `ed25519Keygen(seed)` | Generate signing keypair (SK: 64B, PK: 32B) |
+| `ed25519Sign(msg, sk)` | Sign message (64B signature) |
+| `ed25519Verify(msg, sig, pk)` | Verify signature |
+
+**X25519** (RFC 7748 — Classical Key Exchange)
+
+| Function | Description |
+|----------|-------------|
+| `x25519Keygen(seed)` | Generate keypair (SK: 32B, PK: 32B) |
+| `x25519(sk, pk)` | Diffie-Hellman shared secret (32B) |
+
+**Hybrid Ed25519 + ML-DSA-65** (Classical + Post-Quantum Signature)
+
+Security holds as long as *either* Ed25519 or ML-DSA-65 remains unbroken. Both signatures must independently verify (AND-composition). Ed25519 signs a domain-prefixed message for stripping resistance.
+
+| Function | Description |
+|----------|-------------|
+| `hybridDsaKeygen(seed)` | Generate hybrid keypair (SK: 4096B, PK: 1984B) |
+| `hybridDsaSign(msg, sk, ctx?)` | Sign message (3373B signature) |
+| `hybridDsaVerify(msg, sig, pk, ctx?)` | Verify signature |
+
+**Hybrid X25519 + ML-KEM-768** (Classical + Post-Quantum KEM)
+
+Security holds as long as *either* X25519 or ML-KEM-768 remains unbroken. Both shared secrets are combined via ciphertext-bound HKDF.
+
+| Function | Description |
+|----------|-------------|
+| `hybridKemKeygen(seed)` | Generate hybrid keypair (EK: 1216B, DK: 2432B) |
+| `hybridKemEncaps(ek, randomness?)` | Encapsulate (CT: 1120B, SS: 32B) |
+| `hybridKemDecaps(dk, ct)` | Decapsulate (SS: 32B) |
+
 ### Hash Functions
 
 | Function | Description |
@@ -137,6 +187,14 @@ Arabic, Bengali, Chinese (Simplified, Traditional, Cantonese), Czech, Danish, Du
 | ML-DSA-65 | FIPS 204 | Level 3 (192-bit) | Digital signatures |
 | SLH-DSA-SHAKE-128s | FIPS 205 | Level 1 (128-bit) | Hash-based signatures (stateless) |
 | ML-KEM-768 | FIPS 203 | Level 3 (192-bit) | Key encapsulation |
+| Ed25519 | RFC 8032 | ~128-bit classical | Digital signatures |
+| X25519 | RFC 7748 | ~128-bit classical | Key exchange |
+| Ed25519 + ML-DSA-65 | Hybrid | Classical + Level 3 | Hybrid signatures |
+| X25519 + ML-KEM-768 | Hybrid | Classical + Level 3 | Hybrid key exchange |
+
+### Why Hybrid?
+
+Post-quantum algorithms are relatively new and their security assumptions are less battle-tested than classical elliptic-curve cryptography. Hybrid schemes combine both: if the post-quantum algorithm is broken, classical security remains; if quantum computers break classical crypto, the post-quantum layer protects you. Security is maintained as long as *either* component remains unbroken.
 
 ## Building
 
