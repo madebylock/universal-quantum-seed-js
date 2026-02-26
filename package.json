@@ -8,9 +8,8 @@
     "seed.js",
     "words.js",
     "crypto/",
-    "data/languages/",
+    "dist/",
     "data/visuals/",
-    "tools/",
     "LICENSE",
     "README.md"
   ],
