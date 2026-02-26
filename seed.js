@@ -12,7 +12,7 @@ const { sha256, sha512, hmacSha256, hmacSha512, hkdfExpand, pbkdf2Sha512, pbkdf2
 const { constantTimeEqual } = require("./crypto/utils");
 const { LOOKUP, LANGUAGES, DARK_VISUALS } = require("./words");
 
-const { argon2id } = require("./crypto/argon2");
+const { argon2id, argon2idAsync } = require("./crypto/argon2");
 
 const VERSION = "1.0";
 
@@ -624,8 +624,8 @@ async function getSeedAsync(words, passphrase = "") {
   const stage1 = await pbkdf2Sha512Async(prk, concatBytes(salt, toBytes("-pbkdf2")), PBKDF2_ITERATIONS, 64);
   zeroize(prk);
 
-  // Stage 2: Argon2id on top of PBKDF2 output
-  const stretched = argon2id(
+  // Stage 2: Argon2id on top of PBKDF2 output (off main thread via Web Worker)
+  const stretched = await argon2idAsync(
     stage1,
     concatBytes(salt, toBytes("-argon2id")),
     ARGON2_TIME, ARGON2_MEMORY, ARGON2_PARALLEL, ARGON2_HASHLEN

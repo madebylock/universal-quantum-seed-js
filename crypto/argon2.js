@@ -385,4 +385,70 @@ function argon2id(password, salt, timeCost, memoryCost, parallelism, hashLen) {
   return result;
 }
 
-module.exports = { argon2id, blake2b };
+// ── Async Argon2id (Web Worker) ─────────────────────────────────
+
+let _workerURL = null;
+
+function _getWorkerURL() {
+  if (_workerURL) return _workerURL;
+  // Build a self-contained worker script from the functions above
+  const src = `"use strict";
+${le32.toString()}
+${cat.toString()}
+${loadBlock.toString()}
+${storeBlock.toString()}
+${mulHi.toString()}
+var BLOCK_BYTES=${BLOCK_BYTES},BLOCK_U32=${BLOCK_U32},BLOCK_U64=${BLOCK_U64},SYNC_POINTS=${SYNC_POINTS},MASK64=(1n<<64n)-1n;
+var B2B_IV=[${B2B_IV.map(v => v + "n").join(",")}];
+var SIGMA=${JSON.stringify(SIGMA)};
+${b2bG.toString()}
+${b2bCompress.toString()}
+${blake2b.toString()}
+${argon2Hash.toString()}
+var _R=new Uint32Array(${BLOCK_U32}),_tmp=new Uint32Array(${BLOCK_U32});
+${fBlaMka.toString()}
+${xorRotr.toString()}
+${GB.toString()}
+${blamkaRound.toString()}
+${argon2Compress.toString()}
+${indexAlpha.toString()}
+${generateAddresses.toString()}
+${fillSegment.toString()}
+${argon2id.toString()}
+self.onmessage=function(e){
+  var d=e.data;
+  var r=argon2id(new Uint8Array(d.password),new Uint8Array(d.salt),d.t,d.m,d.p,d.hashLen);
+  self.postMessage(r.buffer,[r.buffer]);
+};`;
+  const blob = new Blob([src], { type: "application/javascript" });
+  _workerURL = URL.createObjectURL(blob);
+  return _workerURL;
+}
+
+function argon2idAsync(password, salt, timeCost, memoryCost, parallelism, hashLen) {
+  if (typeof Worker !== "undefined" && typeof Blob !== "undefined" && typeof URL !== "undefined" && URL.createObjectURL) {
+    return new Promise(function(resolve) {
+      try {
+        var url = _getWorkerURL();
+        var w = new Worker(url);
+        w.onmessage = function(e) {
+          w.terminate();
+          resolve(new Uint8Array(e.data));
+        };
+        w.onerror = function() {
+          w.terminate();
+          resolve(argon2id(password, salt, timeCost, memoryCost, parallelism, hashLen));
+        };
+        // Transfer copies of the typed array data
+        var pw = password.slice().buffer;
+        var sl = salt.slice().buffer;
+        w.postMessage({ password: pw, salt: sl, t: timeCost, m: memoryCost, p: parallelism, hashLen: hashLen }, [pw, sl]);
+      } catch(_) {
+        resolve(argon2id(password, salt, timeCost, memoryCost, parallelism, hashLen));
+      }
+    });
+  }
+  return Promise.resolve(argon2id(password, salt, timeCost, memoryCost, parallelism, hashLen));
+}
+
+module.exports = { argon2id, argon2idAsync, blake2b };
