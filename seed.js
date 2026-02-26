@@ -14,7 +14,7 @@ const { LOOKUP, LANGUAGES, DARK_VISUALS } = require("./words");
 
 const { argon2id } = require("./crypto/argon2");
 
-const VERSION = "1.1";
+const VERSION = "1.0";
 
 // 256 base English words — one per icon position (0-255)
 const BASE_WORDS = [
