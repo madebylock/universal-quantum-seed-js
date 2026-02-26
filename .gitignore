@@ -8,7 +8,6 @@ env/
 venv/
 ENV/
 *.egg-info/
-dist/
 build/
 releases/
 
