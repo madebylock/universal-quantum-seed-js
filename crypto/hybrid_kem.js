@@ -4,7 +4,7 @@
 
 // Hybrid X25519 + ML-KEM-768 key encapsulation mechanism.
 //
-// Both shared secrets are combined via HKDF with ciphertext binding.
+// Both shared secrets are combined via HKDF with ciphertext + public-key binding.
 // Security holds as long as *either* X25519 or ML-KEM-768 remains unbroken.
 //
 // X25519 provides classical (pre-quantum) security (~128-bit).
@@ -44,9 +44,15 @@ const HYBRID_KEM_CT_SIZE = _X25519_PK + _ML_KEM_CT;    // 1,120
  *
  *   salt = SHA-256(x25519_ct || ml_kem_ct)
  *   PRK  = HMAC-SHA256(salt, x25519_ss || ml_kem_ss)    // HKDF-Extract
- *   SS   = HMAC-SHA256(PRK, "hybrid-kem-v1" || 0x01)    // HKDF-Expand
+ *   info = "hybrid-kem-v1" || SHA-256(x25519_pk || ml_kem_ek) || 0x01
+ *   SS   = HMAC-SHA256(PRK, info)                        // HKDF-Expand
+ *
+ * Binding:
+ *   - Ciphertext into the salt prevents substitution attacks.
+ *   - Receiver public keys into the info prevents cross-context reuse.
  */
-function _combineSecrets(x25519Ss, mlKemSs, x25519Ct, mlKemCt) {
+function _combineSecrets(x25519Ss, mlKemSs, x25519Ct, mlKemCt,
+                         x25519Pk, mlKemEk) {
   // salt = SHA-256(x25519_ct || ml_kem_ct)
   const ctConcat = new Uint8Array(x25519Ct.length + mlKemCt.length);
   ctConcat.set(x25519Ct);
@@ -59,12 +65,21 @@ function _combineSecrets(x25519Ss, mlKemSs, x25519Ct, mlKemCt) {
   ssConcat.set(mlKemSs, x25519Ss.length);
   const prk = hmacSha256(salt, ssConcat);
 
-  // SS = HMAC-SHA256(PRK, "hybrid-kem-v1" || 0x01)
-  const info = new Uint8Array([
+  // info = "hybrid-kem-v1" || SHA-256(x25519_pk || ml_kem_ek) || 0x01
+  const pkConcat = new Uint8Array(x25519Pk.length + mlKemEk.length);
+  pkConcat.set(x25519Pk);
+  pkConcat.set(mlKemEk, x25519Pk.length);
+  const pkHash = sha256(pkConcat);
+
+  const label = new Uint8Array([
     0x68, 0x79, 0x62, 0x72, 0x69, 0x64, 0x2d, 0x6b, // "hybrid-k"
     0x65, 0x6d, 0x2d, 0x76, 0x31, // "em-v1"
-    0x01, // counter byte
   ]);
+  const info = new Uint8Array(label.length + pkHash.length + 1);
+  info.set(label);
+  info.set(pkHash, label.length);
+  info[info.length - 1] = 0x01; // counter byte
+
   const ss = hmacSha256(prk, info);
 
   // Best-effort cleanup of intermediate secrets
@@ -131,7 +146,7 @@ function hybridKemEncaps(ek, randomnessIn) {
   ct.set(eph.pk);
   ct.set(mlResult.ct, _X25519_PK);
 
-  const ss = _combineSecrets(xSs, mlResult.ss, eph.pk, mlResult.ct);
+  const ss = _combineSecrets(xSs, mlResult.ss, eph.pk, mlResult.ct, xPk, mlEk);
 
   // Best-effort cleanup of component shared secrets
   zeroize(xSs);
@@ -161,6 +176,10 @@ function hybridKemDecaps(dk, ct) {
   const ephPk = ct.subarray(0, _X25519_PK);
   const mlCt = ct.subarray(_X25519_PK);
 
+  // Recover receiver public keys from dk for HKDF binding
+  const xPk = x25519Keygen(xSk).pk;
+  const mlEk = mlDk.subarray(384 * 3, 384 * 3 + _ML_KEM_EK);
+
   // X25519 shared secret recovery — constant-time, no throw on low-order points.
   // If ephPk is a low-order point, result may be all-zero; ML-KEM carries security.
   const xSs = x25519NoCheck(xSk, ephPk);
@@ -168,8 +187,8 @@ function hybridKemDecaps(dk, ct) {
   // ML-KEM decapsulation
   const mlSs = mlKemDecaps(mlDk, mlCt);
 
-  // Combine shared secrets with ciphertext binding
-  const ss = _combineSecrets(xSs, mlSs, ephPk, mlCt);
+  // Combine shared secrets with ciphertext + public key binding
+  const ss = _combineSecrets(xSs, mlSs, ephPk, mlCt, xPk, mlEk);
 
   // Best-effort cleanup of component shared secrets
   zeroize(xSs);
