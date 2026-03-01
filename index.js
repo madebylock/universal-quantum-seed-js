@@ -77,6 +77,10 @@ module.exports = {
   argon2id: crypto.argon2id,
   blake2b: crypto.blake2b,
 
+  // AES-256-GCM (NIST SP 800-38D) — Authenticated Encryption
+  aesGcmEncrypt: crypto.aesGcmEncrypt,
+  aesGcmDecrypt: crypto.aesGcmDecrypt,
+
   // ── Hash Functions ─────────────────────────────────────
   sha3_256: crypto.sha3_256,
   sha3_512: crypto.sha3_512,
@@ -86,6 +90,11 @@ module.exports = {
   sha512: crypto.sha512,
   hmacSha256: crypto.hmacSha256,
   hmacSha512: crypto.hmacSha512,
+  hkdfExpand: crypto.hkdfExpand,
+  hkdfExpandSha256: crypto.hkdfExpandSha256,
+  hkdfExtractSha256: crypto.hkdfExtractSha256,
+  pbkdf2Sha512: crypto.pbkdf2Sha512,
+  pbkdf2Sha512Async: crypto.pbkdf2Sha512Async,
 
   // ── Entropy & Testing ──────────────────────────────────
   MouseEntropy: seed.MouseEntropy,

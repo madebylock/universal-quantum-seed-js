@@ -31,6 +31,7 @@ const MODULES = [
   ["./crypto/slh_dsa",     "crypto/slh_dsa.js"],
   ["./crypto/hybrid_dsa",  "crypto/hybrid_dsa.js"],
   ["./crypto/hybrid_kem",  "crypto/hybrid_kem.js"],
+  ["./crypto/aes_gcm",     "crypto/aes_gcm.js"],
   ["./crypto",             "crypto/index.js"],
   ["./words",              "words.js"],
   ["./seed",               "seed.js"],
