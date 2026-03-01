@@ -66,6 +66,7 @@ CRYPTO_MODULES = [
     ("./crypto/slh_dsa",    "crypto/slh_dsa.js"),
     ("./crypto/hybrid_dsa", "crypto/hybrid_dsa.js"),
     ("./crypto/hybrid_kem", "crypto/hybrid_kem.js"),
+    ("./crypto/aes_gcm",    "crypto/aes_gcm.js"),
     ("./crypto",            "crypto/index.js"),
 ]
 
@@ -189,6 +190,10 @@ module.exports = {
   // Argon2id (RFC 9106) + Blake2b
   argon2id: crypto.argon2id,
   blake2b: crypto.blake2b,
+
+  // AES-256-GCM (NIST SP 800-38D)
+  aesGcmEncrypt: crypto.aesGcmEncrypt,
+  aesGcmDecrypt: crypto.aesGcmDecrypt,
 
   // Hash Functions
   sha3_256: crypto.sha3_256,

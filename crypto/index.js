@@ -12,6 +12,7 @@ const { x25519Keygen, x25519 } = require("./x25519");
 const { hybridDsaKeygen, hybridDsaSign, hybridDsaVerify } = require("./hybrid_dsa");
 const { hybridKemKeygen, hybridKemEncaps, hybridKemDecaps } = require("./hybrid_kem");
 const { argon2id, blake2b } = require("./argon2");
+const { aesGcmEncrypt, aesGcmDecrypt } = require("./aes_gcm");
 
 module.exports = {
   // SHA-3 / Keccak
@@ -43,4 +44,7 @@ module.exports = {
 
   // Argon2id (RFC 9106) — Memory-hard KDF
   argon2id, blake2b,
+
+  // AES-256-GCM (NIST SP 800-38D) — Symmetric authenticated encryption
+  aesGcmEncrypt, aesGcmDecrypt,
 };

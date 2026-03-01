@@ -885,6 +885,112 @@ process.exit(f > 0 ? 1 : 0);
   fallbackDone = true;
 })();
 
+// ── AES-256-GCM (NIST SP 800-38D) ────────────────────────────────
+
+section("AES-256-GCM");
+
+(() => {
+  function hexToBytes(hex) {
+    if (!hex || hex.length === 0) return new Uint8Array(0);
+    const bytes = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < hex.length; i += 2) {
+      bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
+    }
+    return bytes;
+  }
+
+  function bytesToHex(bytes) {
+    let hex = "";
+    for (let i = 0; i < bytes.length; i++) {
+      hex += ("0" + bytes[i].toString(16)).slice(-2);
+    }
+    return hex;
+  }
+
+  // NIST Test Case 13: AES-256, empty plaintext, empty AAD
+  const k13 = hexToBytes("0000000000000000000000000000000000000000000000000000000000000000");
+  const n13 = hexToBytes("000000000000000000000000");
+  const ct13 = crypto.aesGcmEncrypt(k13, n13, new Uint8Array(0));
+  assert(bytesToHex(ct13) === "530f8afbc74536b9a963b4f1c4cb738b",
+    "AES-GCM NIST test case 13 encrypt");
+  const pt13 = crypto.aesGcmDecrypt(k13, n13, ct13);
+  assert(pt13.length === 0, "AES-GCM NIST test case 13 decrypt");
+
+  // NIST Test Case 14: AES-256, 16-byte zero plaintext, no AAD
+  const pt14 = hexToBytes("00000000000000000000000000000000");
+  const ct14 = crypto.aesGcmEncrypt(k13, n13, pt14);
+  assert(bytesToHex(ct14) === "cea7403d4d606b6e074ec5d3baf39d18d0d1c8a799996bf0265b98b5d48ab919",
+    "AES-GCM NIST test case 14 encrypt");
+  const dec14 = crypto.aesGcmDecrypt(k13, n13, ct14);
+  assert(bytesToHex(dec14) === "00000000000000000000000000000000",
+    "AES-GCM NIST test case 14 decrypt");
+
+  // NIST Test Case 16: AES-256, 60-byte plaintext, 20-byte AAD
+  const k16 = hexToBytes("feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308");
+  const n16 = hexToBytes("cafebabefacedbaddecaf888");
+  const pt16 = hexToBytes(
+    "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a72" +
+    "1c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39"
+  );
+  const aad16 = hexToBytes("feedfacedeadbeeffeedfacedeadbeefabaddad2");
+  const expected16 =
+    "522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa" +
+    "8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f662" +
+    "76fc6ece0f4e1768cddf8853bb2d551b";
+  const ct16 = crypto.aesGcmEncrypt(k16, n16, pt16, aad16);
+  assert(bytesToHex(ct16) === expected16, "AES-GCM NIST test case 16 encrypt");
+  const dec16 = crypto.aesGcmDecrypt(k16, n16, ct16, aad16);
+  assert(bytesToHex(dec16) === bytesToHex(pt16), "AES-GCM NIST test case 16 decrypt");
+
+  // Round-trip with random data
+  const rKey = randomBytes(32);
+  const rNonce = randomBytes(12);
+  const rPt = randomBytes(1000);
+  const rAad = randomBytes(50);
+  const rCt = crypto.aesGcmEncrypt(rKey, rNonce, rPt, rAad);
+  assert(rCt.length === rPt.length + 16, "AES-GCM random round-trip ciphertext length");
+  const rDec = crypto.aesGcmDecrypt(rKey, rNonce, rCt, rAad);
+  let rMatch = rDec.length === rPt.length;
+  for (let i = 0; i < rPt.length && rMatch; i++) rMatch = rDec[i] === rPt[i];
+  assert(rMatch, "AES-GCM random round-trip decrypt matches");
+
+  // Tampered ciphertext must be rejected
+  const tCt = new Uint8Array(rCt);
+  tCt[0] ^= 0xff;
+  let tamperRejected = false;
+  try { crypto.aesGcmDecrypt(rKey, rNonce, tCt, rAad); } catch (_) { tamperRejected = true; }
+  assert(tamperRejected, "AES-GCM rejects tampered ciphertext");
+
+  // Tampered tag must be rejected
+  const tTag = new Uint8Array(rCt);
+  tTag[tTag.length - 1] ^= 0x01;
+  let tagRejected = false;
+  try { crypto.aesGcmDecrypt(rKey, rNonce, tTag, rAad); } catch (_) { tagRejected = true; }
+  assert(tagRejected, "AES-GCM rejects tampered tag");
+
+  // Wrong key must be rejected
+  const wrongKey = randomBytes(32);
+  let wrongKeyRejected = false;
+  try { crypto.aesGcmDecrypt(wrongKey, rNonce, rCt, rAad); } catch (_) { wrongKeyRejected = true; }
+  assert(wrongKeyRejected, "AES-GCM rejects wrong key");
+
+  // Empty plaintext
+  const eCt = crypto.aesGcmEncrypt(rKey, rNonce, new Uint8Array(0));
+  assert(eCt.length === 16, "AES-GCM empty plaintext produces 16-byte tag");
+  const eDec = crypto.aesGcmDecrypt(rKey, rNonce, eCt);
+  assert(eDec.length === 0, "AES-GCM empty plaintext round-trip");
+
+  // Invalid key size
+  let badKeyRejected = false;
+  try { crypto.aesGcmEncrypt(new Uint8Array(16), rNonce, rPt); } catch (_) { badKeyRejected = true; }
+  assert(badKeyRejected, "AES-GCM rejects 16-byte key");
+
+  // Invalid nonce size
+  let badNonceRejected = false;
+  try { crypto.aesGcmEncrypt(rKey, new Uint8Array(8), rPt); } catch (_) { badNonceRejected = true; }
+  assert(badNonceRejected, "AES-GCM rejects 8-byte nonce");
+})();
+
 // ── Summary ───────────────────────────────────────────────────────
 
 // Wait for async tests to complete before printing summary
