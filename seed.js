@@ -725,25 +725,9 @@ function generateWords(wordCount = 36, extraEntropy = null, language = null) {
 // ── Fingerprint ─────────────────────────────────────────────────
 
 function getFingerprint(seed, passphrase = "") {
-  const indexes = toIndexes(seed);
-  if (indexes.length !== 24 && indexes.length !== 36) {
-    throw new Error(`seed must be 24 or 36 words, got ${indexes.length}`);
-  }
-  const data = indexes.slice(0, -2);
-
-  let key;
-  if (passphrase) {
-    key = getSeed(indexes, passphrase);
-  } else {
-    const parts = [];
-    for (let pos = 0; pos < data.length; pos++) {
-      parts.push(packLE_BB(pos, data[pos]));
-    }
-    key = hmacSha512(DOMAIN, concatBytes(...parts));
-  }
-
-  const hex = Array.from(key.subarray(0, 4), b => b.toString(16).padStart(2, "0")).join("").toUpperCase();
-  return hex;
+  const key = getSeed(seed, passphrase);
+  const hash = sha256(key);
+  return Array.from(hash.subarray(0, 4), b => b.toString(16).padStart(2, "0")).join("").toUpperCase();
 }
 
 // ── Entropy Bits ────────────────────────────────────────────────
