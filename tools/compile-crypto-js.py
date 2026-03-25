@@ -194,6 +194,8 @@ module.exports = {
   // AES-256-GCM (NIST SP 800-38D)
   aesGcmEncrypt: crypto.aesGcmEncrypt,
   aesGcmDecrypt: crypto.aesGcmDecrypt,
+  aesGcmEncryptAsync: crypto.aesGcmEncryptAsync,
+  aesGcmDecryptAsync: crypto.aesGcmDecryptAsync,
 
   // Hash Functions
   sha3_256: crypto.sha3_256,

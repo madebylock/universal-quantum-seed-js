@@ -145,58 +145,57 @@ function wipeBuf(buf) {
   if (buf && typeof buf.fill === "function") buf.fill(0);
 }
 
-function ghashMul(X, Y) {
-  const V = new Uint8Array(16);
-  V.set(Y);
-  const Z = new Uint8Array(16);
+// Pre-allocated work buffers for GCM — eliminates thousands of
+// per-block Uint8Array allocations that overwhelm GC in browsers
+// without crypto.subtle (non-secure contexts like custom domains).
+const _ghV = new Uint8Array(16);   // ghashMul scratch (V register)
+const _ghO = new Uint8Array(16);   // ghashMul output
+const _ks  = new Uint8Array(16);   // CTR keystream block
+
+function ghashMul(Y, H) {
+  // Multiply Y * H in GF(2^128), result written to _ghO.
+  // Caller must copy _ghO before the next ghashMul call.
+  _ghV.set(H);
+  _ghO.fill(0);
   for (let i = 0; i < 128; i++) {
-    if ((X[i >>> 3] >>> (7 - (i & 7))) & 1) {
-      for (let j = 0; j < 16; j++) Z[j] ^= V[j];
+    if ((Y[i >>> 3] >>> (7 - (i & 7))) & 1) {
+      for (let j = 0; j < 16; j++) _ghO[j] ^= _ghV[j];
     }
-    const lsb = V[15] & 1;
-    for (let j = 15; j > 0; j--) V[j] = (V[j] >>> 1) | ((V[j - 1] & 1) << 7);
-    V[0] >>>= 1;
-    if (lsb) V[0] ^= 0xe1;
+    const lsb = _ghV[15] & 1;
+    for (let j = 15; j > 0; j--) _ghV[j] = (_ghV[j] >>> 1) | ((_ghV[j - 1] & 1) << 7);
+    _ghV[0] >>>= 1;
+    if (lsb) _ghV[0] ^= 0xe1;
   }
-  return Z;
 }
 
-function ghash(H, data) {
-  let Y = new Uint8Array(16);
+function ghashBlock(Y, H) {
+  // In-place: Y = ghashMul(Y, H)
+  ghashMul(Y, H);
+  Y.set(_ghO);
+}
+
+function ghashUpdate(Y, H, data) {
+  // Process data (with implicit zero-padding to 16-byte boundary)
   for (let off = 0; off < data.length; off += 16) {
     const end = Math.min(16, data.length - off);
     for (let i = 0; i < end; i++) Y[i] ^= data[off + i];
-    Y = ghashMul(Y, H);
+    ghashBlock(Y, H);
   }
-  return Y;
 }
 
-function pad16(len) {
-  const r = len % 16;
-  return r === 0 ? 0 : 16 - r;
-}
-
-function buildGhashInput(aad, ct) {
-  const aadPad = pad16(aad.length);
-  const ctPad = pad16(ct.length);
-  const input = new Uint8Array(aad.length + aadPad + ct.length + ctPad + 16);
-  input.set(aad, 0);
-  input.set(ct, aad.length + aadPad);
-  // Length block: len_AAD (64-bit) || len_CT (64-bit), big-endian, in bits
-  const lenOff = input.length - 16;
-  const aadBits = aad.length * 8;
-  const ctBits = ct.length * 8;
-  // AAD length (upper 8 bytes — only lower 32 bits used for practical sizes)
-  input[lenOff + 4] = (aadBits >>> 24) & 0xff;
-  input[lenOff + 5] = (aadBits >>> 16) & 0xff;
-  input[lenOff + 6] = (aadBits >>> 8)  & 0xff;
-  input[lenOff + 7] =  aadBits         & 0xff;
-  // CT length (lower 8 bytes)
-  input[lenOff + 12] = (ctBits >>> 24) & 0xff;
-  input[lenOff + 13] = (ctBits >>> 16) & 0xff;
-  input[lenOff + 14] = (ctBits >>> 8)  & 0xff;
-  input[lenOff + 15] =  ctBits         & 0xff;
-  return input;
+function ghashFinalize(Y, H, aadLen, ctLen) {
+  // Process the length block: len_AAD (64-bit) || len_CT (64-bit), in bits
+  const aadBits = aadLen * 8;
+  const ctBits = ctLen * 8;
+  Y[4]  ^= (aadBits >>> 24) & 0xff;
+  Y[5]  ^= (aadBits >>> 16) & 0xff;
+  Y[6]  ^= (aadBits >>> 8)  & 0xff;
+  Y[7]  ^=  aadBits         & 0xff;
+  Y[12] ^= (ctBits >>> 24) & 0xff;
+  Y[13] ^= (ctBits >>> 16) & 0xff;
+  Y[14] ^= (ctBits >>> 8)  & 0xff;
+  Y[15] ^=  ctBits         & 0xff;
+  ghashBlock(Y, H);
 }
 
 // --- Public API ---
@@ -240,18 +239,20 @@ function aesGcmEncrypt(key, nonce, plaintext, aad) {
     const ctr = new Uint8Array(J0);
     for (let off = 0; off < plaintext.length; off += 16) {
       incCtr(ctr);
-      const ks = new Uint8Array(ctr);
-      aesBlock(ks, rk);
+      _ks.set(ctr);
+      aesBlock(_ks, rk);
       const end = Math.min(16, plaintext.length - off);
-      for (let i = 0; i < end; i++) ct[off + i] = plaintext[off + i] ^ ks[i];
+      for (let i = 0; i < end; i++) ct[off + i] = plaintext[off + i] ^ _ks[i];
     }
 
-    // Compute tag
-    const ghashInput = buildGhashInput(aad, ct);
-    const tag = ghash(H, ghashInput);
-    const encJ0 = new Uint8Array(J0);
-    aesBlock(encJ0, rk);
-    for (let i = 0; i < 16; i++) tag[i] ^= encJ0[i];
+    // Compute GHASH tag (streaming — no buildGhashInput allocation)
+    const tag = new Uint8Array(16);
+    ghashUpdate(tag, H, aad);
+    ghashUpdate(tag, H, ct);
+    ghashFinalize(tag, H, aad.length, ct.length);
+    _ks.set(J0);
+    aesBlock(_ks, rk);
+    for (let i = 0; i < 16; i++) tag[i] ^= _ks[i];
 
     // Return ct || tag
     const result = new Uint8Array(ct.length + 16);
@@ -290,9 +291,10 @@ function aesGcmDecrypt(key, nonce, ciphertextWithTag, aad) {
 
   if (_nativeDecrypt) return _nativeDecrypt(key, nonce, ciphertextWithTag, aad);
 
-  // Pure-JS fallback
-  const ct = ciphertextWithTag.slice(0, ciphertextWithTag.length - 16);
-  const receivedTag = ciphertextWithTag.slice(ciphertextWithTag.length - 16);
+  // Pure-JS fallback — use subarray (views) to avoid copying data
+  const ctLen = ciphertextWithTag.length - 16;
+  const ct = ciphertextWithTag.subarray(0, ctLen);
+  const receivedTag = ciphertextWithTag.subarray(ctLen);
 
   const rk = keyExpansion(key);
   const H = new Uint8Array(16);
@@ -304,12 +306,14 @@ function aesGcmDecrypt(key, nonce, ciphertextWithTag, aad) {
     J0.set(nonce);
     J0[15] = 1;
 
-    // Verify tag
-    const ghashInput = buildGhashInput(aad, ct);
-    const computedTag = ghash(H, ghashInput);
-    const encJ0 = new Uint8Array(J0);
-    aesBlock(encJ0, rk);
-    for (let i = 0; i < 16; i++) computedTag[i] ^= encJ0[i];
+    // Verify tag (streaming GHASH — no buildGhashInput allocation)
+    const computedTag = new Uint8Array(16);
+    ghashUpdate(computedTag, H, aad);
+    ghashUpdate(computedTag, H, ct);
+    ghashFinalize(computedTag, H, aad.length, ct.length);
+    _ks.set(J0);
+    aesBlock(_ks, rk);
+    for (let i = 0; i < 16; i++) computedTag[i] ^= _ks[i];
 
     // Constant-time tag comparison
     let diff = 0;
@@ -321,10 +325,10 @@ function aesGcmDecrypt(key, nonce, ciphertextWithTag, aad) {
     const ctr = new Uint8Array(J0);
     for (let off = 0; off < ct.length; off += 16) {
       incCtr(ctr);
-      const ks = new Uint8Array(ctr);
-      aesBlock(ks, rk);
+      _ks.set(ctr);
+      aesBlock(_ks, rk);
       const end = Math.min(16, ct.length - off);
-      for (let i = 0; i < end; i++) plaintext[off + i] = ct[off + i] ^ ks[i];
+      for (let i = 0; i < end; i++) plaintext[off + i] = ct[off + i] ^ _ks[i];
     }
 
     return plaintext;
@@ -334,4 +338,46 @@ function aesGcmDecrypt(key, nonce, ciphertextWithTag, aad) {
   }
 }
 
-module.exports = { aesGcmEncrypt, aesGcmDecrypt };
+// Track elapsed time since last GC yield.  Yielding on every operation
+// adds ~1-4ms per call which makes page switches laggy.  Instead, yield
+// every ~50ms — enough for GC to run (~20 windows/s) without adding
+// noticeable latency to individual operations.
+var _lastYieldTime = 0;
+var _GC_YIELD_INTERVAL = 50; // ms
+
+function _maybeYield(result) {
+  var now = Date.now();
+  if (now - _lastYieldTime >= _GC_YIELD_INTERVAL) {
+    _lastYieldTime = now;
+    return new Promise(function(r) { setTimeout(function() { r(result); }, 0); });
+  }
+  return Promise.resolve(result);
+}
+
+/**
+ * Async AES-256-GCM encrypt with periodic main-thread yield.
+ *
+ * Identical to aesGcmEncrypt but periodically yields the main thread
+ * to give the browser a macrotask boundary for garbage collection.
+ * Without this, back-to-back pure-JS encrypt/decrypt calls starve the
+ * GC and processed buffers accumulate in the tenured heap indefinitely
+ * (observed as multi-GB memory growth in Firefox when crypto.subtle
+ * is unavailable).
+ */
+function aesGcmEncryptAsync(key, nonce, plaintext, aad) {
+  try { var result = aesGcmEncrypt(key, nonce, plaintext, aad); }
+  catch (e) { return Promise.reject(e); }
+  return _maybeYield(result);
+}
+
+/**
+ * Async AES-256-GCM decrypt with periodic main-thread yield.
+ * See aesGcmEncryptAsync for rationale.
+ */
+function aesGcmDecryptAsync(key, nonce, ciphertextWithTag, aad) {
+  try { var result = aesGcmDecrypt(key, nonce, ciphertextWithTag, aad); }
+  catch (e) { return Promise.reject(e); }
+  return _maybeYield(result);
+}
+
+module.exports = { aesGcmEncrypt, aesGcmDecrypt, aesGcmEncryptAsync, aesGcmDecryptAsync };
