@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Signer.io — MIT License
+// Copyright (c) 2026 Lock.com — MIT License
 
 "use strict";
 

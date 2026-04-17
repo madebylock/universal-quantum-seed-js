@@ -35,11 +35,11 @@
     "wallet",
     "entropy"
   ],
-  "author": "Signer.io",
+  "author": "Lock.com",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/SignerHQ/universal-quantum-seed-js"
+    "url": "https://github.com/madebylock/universal-quantum-seed-js"
   },
   "engines": {
     "node": ">=16.0.0"

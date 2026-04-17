@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2026 Signer.io — MIT License
+# Copyright (c) 2026 Lock.com — MIT License
 
 """
 Compile language files into words.js for the JavaScript edition.
@@ -162,7 +162,7 @@ def compile_lookup():
         seed_words = getattr(mod, "SEED_WORDS", None)
 
         if seed_words is None:
-            # base.py has signer_universal_seed_base instead
+            # base.py has lock_universal_seed_base instead
             continue
 
         word_count = 0
@@ -183,7 +183,7 @@ def compile_lookup():
     # Add emoji from base.py
     try:
         base_mod = importlib.import_module("base")
-        base_data = getattr(base_mod, "signer_universal_seed_base", [])
+        base_data = getattr(base_mod, "lock_universal_seed_base", [])
         emoji_count = 0
         for idx, emoji, _word in base_data:
             e_norm = normalize_emoji(emoji)

@@ -52,8 +52,8 @@ function build() {
 
   // IIFE header
   parts.push(`// Universal Quantum Seed v${version} — Browser Bundle
-// https://github.com/SignerHQ/universal-quantum-seed-js
-// MIT License — (c) 2026 Signer.io
+// https://github.com/madebylock/universal-quantum-seed-js
+// MIT License — (c) 2026 Lock.com
 //
 // Usage:
 //   <script src="uqs.js"><\/script>

@@ -1,6 +1,6 @@
 // Universal Quantum Seed v1.0 — Crypto-Only Bundle
-// https://github.com/SignerHQ/universal-quantum-seed-js
-// MIT License — (c) 2026 Signer.io
+// https://github.com/madebylock/universal-quantum-seed-js
+// MIT License — (c) 2026 Lock.com
 //
 // Crypto-only build: all cryptographic primitives + key derivation.
 // No wordlists, no word resolution, no language data (~75% smaller).
@@ -52,7 +52,7 @@ var _dirs = {};
 // ── crypto/utils.js ──
 _dirs["./crypto/utils"] = "./crypto";
 _modules["./crypto/utils"] = function(module, exports, require) {
-// Copyright (c) 2026 Signer.io — MIT License
+// Copyright (c) 2026 Lock.com — MIT License
 
 "use strict";
 
@@ -207,7 +207,7 @@ module.exports = { toBytes, concatBytes, randomBytes, zeroize, constantTimeEqual
 // ── crypto/field25519.js ──
 _dirs["./crypto/field25519"] = "./crypto";
 _modules["./crypto/field25519"] = function(module, exports, require) {
-// Copyright (c) 2026 Signer.io — MIT License
+// Copyright (c) 2026 Lock.com — MIT License
 
 "use strict";
 
@@ -528,7 +528,7 @@ module.exports = {
 // ── crypto/sha2.js ──
 _dirs["./crypto/sha2"] = "./crypto";
 _modules["./crypto/sha2"] = function(module, exports, require) {
-// Copyright (c) 2026 Signer.io — MIT License
+// Copyright (c) 2026 Lock.com — MIT License
 
 "use strict";
 
@@ -958,7 +958,7 @@ module.exports = {
 // ── crypto/sha3.js ──
 _dirs["./crypto/sha3"] = "./crypto";
 _modules["./crypto/sha3"] = function(module, exports, require) {
-// Copyright (c) 2026 Signer.io — MIT License
+// Copyright (c) 2026 Lock.com — MIT License
 
 "use strict";
 
@@ -1329,7 +1329,7 @@ module.exports = {
 // ── crypto/argon2.js ──
 _dirs["./crypto/argon2"] = "./crypto";
 _modules["./crypto/argon2"] = function(module, exports, require) {
-// Copyright (c) 2026 Signer.io — MIT License
+// Copyright (c) 2026 Lock.com — MIT License
 
 "use strict";
 
@@ -1789,7 +1789,7 @@ module.exports = { argon2id, argon2idAsync, blake2b };
 // ── crypto/ed25519.js ──
 _dirs["./crypto/ed25519"] = "./crypto";
 _modules["./crypto/ed25519"] = function(module, exports, require) {
-// Copyright (c) 2026 Signer.io — MIT License
+// Copyright (c) 2026 Lock.com — MIT License
 
 "use strict";
 
@@ -2206,7 +2206,7 @@ module.exports = {
 // ── crypto/x25519.js ──
 _dirs["./crypto/x25519"] = "./crypto";
 _modules["./crypto/x25519"] = function(module, exports, require) {
-// Copyright (c) 2026 Signer.io — MIT License
+// Copyright (c) 2026 Lock.com — MIT License
 
 "use strict";
 
@@ -2403,7 +2403,7 @@ module.exports = { x25519Keygen, x25519, x25519NoCheck, x25519Raw, X25519_SK_SIZ
 // ── crypto/ml_dsa.js ──
 _dirs["./crypto/ml_dsa"] = "./crypto";
 _modules["./crypto/ml_dsa"] = function(module, exports, require) {
-// Copyright (c) 2026 Signer.io — MIT License
+// Copyright (c) 2026 Lock.com — MIT License
 
 "use strict";
 
@@ -3657,7 +3657,7 @@ module.exports = {
 // ── crypto/ml_kem.js ──
 _dirs["./crypto/ml_kem"] = "./crypto";
 _modules["./crypto/ml_kem"] = function(module, exports, require) {
-// Copyright (c) 2026 Signer.io — MIT License
+// Copyright (c) 2026 Lock.com — MIT License
 
 "use strict";
 
@@ -4177,7 +4177,7 @@ module.exports = { mlKemKeygen, mlKemEncaps, mlKemDecaps, EK_SIZE, DK_SIZE, CT_S
 // ── crypto/slh_dsa.js ──
 _dirs["./crypto/slh_dsa"] = "./crypto";
 _modules["./crypto/slh_dsa"] = function(module, exports, require) {
-// Copyright (c) 2026 Signer.io — MIT License
+// Copyright (c) 2026 Lock.com — MIT License
 
 "use strict";
 
@@ -5323,7 +5323,7 @@ module.exports = {
 // ── crypto/hybrid_dsa.js ──
 _dirs["./crypto/hybrid_dsa"] = "./crypto";
 _modules["./crypto/hybrid_dsa"] = function(module, exports, require) {
-// Copyright (c) 2026 Signer.io — MIT License
+// Copyright (c) 2026 Lock.com — MIT License
 
 "use strict";
 
@@ -5500,7 +5500,7 @@ module.exports = {
 // ── crypto/hybrid_kem.js ──
 _dirs["./crypto/hybrid_kem"] = "./crypto";
 _modules["./crypto/hybrid_kem"] = function(module, exports, require) {
-// Copyright (c) 2026 Signer.io — MIT License
+// Copyright (c) 2026 Lock.com — MIT License
 
 "use strict";
 
@@ -5713,7 +5713,7 @@ module.exports = {
 // ── crypto/aes_gcm.js ──
 _dirs["./crypto/aes_gcm"] = "./crypto";
 _modules["./crypto/aes_gcm"] = function(module, exports, require) {
-// Copyright (c) 2026 Signer.io — MIT License
+// Copyright (c) 2026 Lock.com — MIT License
 
 "use strict";
 
@@ -6102,7 +6102,7 @@ module.exports = { aesGcmEncrypt, aesGcmDecrypt, aesGcmEncryptAsync, aesGcmDecry
 // ── crypto/index.js ──
 _dirs["./crypto"] = "./crypto";
 _modules["./crypto"] = function(module, exports, require) {
-// Copyright (c) 2026 Signer.io — MIT License
+// Copyright (c) 2026 Lock.com — MIT License
 
 "use strict";
 
@@ -6159,7 +6159,7 @@ module.exports = {
 // ── seed.js (crypto-only) ──
 _dirs["./seed"] = ".";
 _modules["./seed"] = function(module, exports, require) {
-// Copyright (c) 2026 Signer.io — MIT License
+// Copyright (c) 2026 Lock.com — MIT License
 
 "use strict";
 
