@@ -6,7 +6,10 @@
 //
 // Generates cryptographically secure seeds using 256 visual icons (8 bits each).
 // - 24 words = 22 random + 2 checksum = 176 bits entropy
+//   (accepted for recovery/classical compatibility, not recommended for new
+//   long-term seeds)
 // - 36 words = 34 random + 2 checksum = 272 bits entropy
+//   (recommended default and required for post-quantum derivation)
 
 const { sha256, sha512, hmacSha256, hmacSha512, hkdfExpand, pbkdf2Sha512, pbkdf2Sha512Async } = require("./crypto/sha2");
 const { constantTimeEqual } = require("./crypto/utils");

@@ -6217,7 +6217,10 @@ _modules["./seed"] = function(module, exports, require) {
 //
 // Generates cryptographically secure seeds using 256 visual icons (8 bits each).
 // - 24 words = 22 random + 2 checksum = 176 bits entropy
+//   (accepted for recovery/classical compatibility, not recommended for new
+//   long-term seeds)
 // - 36 words = 34 random + 2 checksum = 272 bits entropy
+//   (recommended default and required for post-quantum derivation)
 
 const { sha256, sha512, hmacSha256, hmacSha512, hkdfExpand, pbkdf2Sha512, pbkdf2Sha512Async } = require("./crypto/sha2");
 const { constantTimeEqual } = require("./crypto/utils");
@@ -6403,6 +6406,11 @@ function collectEntropy(nBytes, extraEntropy) {
 // ── Checksum ────────────────────────────────────────────────────
 
 function computeChecksum(indexes) {
+  // Intentional: this checksum detects transcription mistakes; it is not an
+  // authenticity check. Two 8-bit words give 16 bits of error detection,
+  // stronger than BIP39's 24-word checksum, while preserving the seed format.
+  // Widening it would remove entropy words and break existing seed recovery
+  // unless introduced as a separate versioned format.
   const key = concatBytes(DOMAIN, toBytes("-checksum"));
   const digest = hmacSha256(key, new Uint8Array(indexes));
   return [digest[0], digest[1]];
