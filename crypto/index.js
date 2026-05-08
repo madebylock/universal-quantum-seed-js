@@ -6,7 +6,15 @@ const { sha3_256, sha3_512, shake128, shake256, shake128Xof, shake256Xof } = req
 const { sha256, sha512, hmacSha256, hmacSha512, hkdfExpand, hkdfExpandSha256, hkdfExtractSha256, pbkdf2Sha512, pbkdf2Sha512Async } = require("./sha2");
 const { mlKeygen, mlSign, mlVerify, mlSignWithContext, mlVerifyWithContext, mlSignAsync, mlVerifyAsync } = require("./ml_dsa");
 const { slhKeygen, slhSign, slhVerify, slhSignWithContext, slhVerifyWithContext, slhSignAsync, slhVerifyAsync } = require("./slh_dsa");
-const { mlKemKeygen, mlKemEncaps, mlKemDecaps } = require("./ml_kem");
+const {
+  ML_KEM_CT_SIZE,
+  ML_KEM_DK_SIZE,
+  ML_KEM_EK_SIZE,
+  mlKemKeygen,
+  mlKemEncaps,
+  mlKemDecaps,
+  mlKemEkFromDk,
+} = require("./ml_kem");
 const { ed25519Keygen, ed25519Sign, ed25519Verify } = require("./ed25519");
 const { x25519Keygen, x25519 } = require("./x25519");
 const { hybridDsaKeygen, hybridDsaSign, hybridDsaVerify } = require("./hybrid_dsa");
@@ -28,7 +36,8 @@ module.exports = {
   slhKeygen, slhSign, slhVerify, slhSignWithContext, slhVerifyWithContext, slhSignAsync, slhVerifyAsync,
 
   // ML-KEM-768 (FIPS 203) — Post-quantum key encapsulation
-  mlKemKeygen, mlKemEncaps, mlKemDecaps,
+  mlKemKeygen, mlKemEncaps, mlKemDecaps, mlKemEkFromDk,
+  ML_KEM_EK_SIZE, ML_KEM_DK_SIZE, ML_KEM_CT_SIZE,
 
   // Ed25519 (RFC 8032) — Classical digital signature
   ed25519Keygen, ed25519Sign, ed25519Verify,

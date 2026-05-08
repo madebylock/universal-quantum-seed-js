@@ -5,6 +5,8 @@
 // Basic test harness — round-trip tests, edge cases, and cross-checks.
 // Run with: node tools/test.js
 
+const fs = require("fs");
+const path = require("path");
 const crypto = require("../crypto");
 const { toBytes, randomBytes, constantTimeEqual } = require("../crypto/utils");
 
@@ -206,6 +208,17 @@ section("ML-KEM-768");
 
   const ssDec = crypto.mlKemDecaps(dk, ct);
   assert(constantTimeEqual(ssEnc, ssDec), "encaps/decaps shared secrets should match");
+  assert(constantTimeEqual(crypto.mlKemEkFromDk(dk), ek), "mlKemEkFromDk should recover embedded ek");
+
+  const badDk = new Uint8Array(dk);
+  const ekOffset = dk.length - ek.length - 64; // H(ek) || z are the trailing fields.
+  badDk[ekOffset] ^= 0x01;
+  try {
+    crypto.mlKemEkFromDk(badDk);
+    assert(false, "mlKemEkFromDk should reject dk with bad H(ek)");
+  } catch (_) {
+    assert(true, "mlKemEkFromDk rejects dk with bad H(ek)");
+  }
 
   // Deterministic encaps
   const rnd = randomBytes(32);
@@ -272,6 +285,9 @@ section("Hybrid X25519 + ML-KEM-768");
 
   const ssDec = crypto.hybridKemDecaps(dk, ct);
   assert(constantTimeEqual(ssEnc, ssDec), "encaps/decaps shared secrets should match");
+  const hybridKemSrc = fs.readFileSync(path.join(__dirname, "../crypto/hybrid_kem.js"), "utf8");
+  assert(hybridKemSrc.includes("mlKemEkFromDk"), "hybrid KEM should use checked ML-KEM dk parser");
+  assert(!/384\s*\*\s*3/.test(hybridKemSrc), "hybrid KEM should not duplicate ML-KEM dk offsets");
 
   // Tampered X25519 part of ciphertext — should not throw
   const badCt = new Uint8Array(ct);

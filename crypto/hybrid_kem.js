@@ -23,16 +23,24 @@
 // Best-effort constant-time. For hardware side-channel resistance, use C/Rust.
 
 const { x25519Keygen, x25519, x25519NoCheck } = require("./x25519");
-const { mlKemKeygen, mlKemEncaps, mlKemDecaps } = require("./ml_kem");
+const {
+  ML_KEM_CT_SIZE,
+  ML_KEM_DK_SIZE,
+  ML_KEM_EK_SIZE,
+  mlKemKeygen,
+  mlKemEncaps,
+  mlKemDecaps,
+  mlKemEkFromDk,
+} = require("./ml_kem");
 const { sha256, hmacSha256 } = require("./sha2");
 const { randomBytes, zeroize } = require("./utils");
 
 // Component sizes
 const _X25519_SK = 32;
 const _X25519_PK = 32;
-const _ML_KEM_EK = 1184;
-const _ML_KEM_DK = 2400;
-const _ML_KEM_CT = 1088;
+const _ML_KEM_EK = ML_KEM_EK_SIZE;
+const _ML_KEM_DK = ML_KEM_DK_SIZE;
+const _ML_KEM_CT = ML_KEM_CT_SIZE;
 
 // Hybrid sizes
 const HYBRID_KEM_EK_SIZE = _X25519_PK + _ML_KEM_EK;    // 1,216
@@ -178,7 +186,7 @@ function hybridKemDecaps(dk, ct) {
 
   // Recover receiver public keys from dk for HKDF binding
   const xPk = x25519Keygen(xSk).pk;
-  const mlEk = mlDk.subarray(384 * 3, 384 * 3 + _ML_KEM_EK);
+  const mlEk = mlKemEkFromDk(mlDk);
 
   // X25519 shared secret recovery — constant-time, no throw on low-order points.
   // If ephPk is a low-order point, result may be all-zero; ML-KEM carries security.

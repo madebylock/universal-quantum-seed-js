@@ -23,6 +23,12 @@ const ETA2 = 2;
 const DU = 10;
 const DV = 4;
 
+const ML_KEM_EK_SIZE = 1184;
+const ML_KEM_DK_SIZE = 2400;
+const ML_KEM_CT_SIZE = 1088;
+const ML_KEM_SS_SIZE = 32;
+const K_PKE_DK_SIZE = 384 * K;
+
 // ── NTT Constants ────────────────────────────────────────────────
 
 function bitrev7(n) {
@@ -277,7 +283,7 @@ function kPkeKeygen(d) {
   }
 
   // Encode ek = t_hat || rho
-  let ekLen = 384 * K + 32;
+  let ekLen = K_PKE_DK_SIZE + 32;
   const ekPke = new Uint8Array(ekLen);
   let offset = 0;
   for (let i = 0; i < K; i++) {
@@ -287,7 +293,7 @@ function kPkeKeygen(d) {
   ekPke.set(rho, offset);
 
   // dk = encode(s)
-  const dkPke = new Uint8Array(384 * K);
+  const dkPke = new Uint8Array(K_PKE_DK_SIZE);
   offset = 0;
   for (let i = 0; i < K; i++) {
     dkPke.set(byteEncode(s[i], 12), offset);
@@ -406,7 +412,7 @@ const { randomBytes, constantTimeEqual } = require("./utils");
 // ── FIPS 203 Input Validation (§7.1, §7.2) ──────────────────────
 
 function ekModulusCheck(ek) {
-  if (ek.length !== 1184) return false;
+  if (ek.length !== ML_KEM_EK_SIZE) return false;
   // Constant-time: check all chunks without early return
   let valid = 1;
   for (let i = 0; i < K; i++) {
@@ -418,10 +424,19 @@ function ekModulusCheck(ek) {
 }
 
 function dkHashCheck(dk) {
-  if (dk.length !== 2400) return false;
-  const ek = dk.subarray(384 * K, 384 * K + 1184);
-  const hStored = dk.subarray(384 * K + 1184, 384 * K + 1184 + 32);
+  if (dk.length !== ML_KEM_DK_SIZE) return false;
+  const ek = dk.subarray(K_PKE_DK_SIZE, K_PKE_DK_SIZE + ML_KEM_EK_SIZE);
+  const hStored = dk.subarray(
+    K_PKE_DK_SIZE + ML_KEM_EK_SIZE,
+    K_PKE_DK_SIZE + ML_KEM_EK_SIZE + 32
+  );
   return constantTimeEqual(sha3_256(ek), hStored);
+}
+
+function mlKemEkFromDk(dk) {
+  if (!(dk instanceof Uint8Array)) throw new Error("dk must be a Uint8Array");
+  if (!dkHashCheck(dk)) throw new Error("Decapsulation key failed FIPS 203 hash check (§7.2)");
+  return new Uint8Array(dk.subarray(K_PKE_DK_SIZE, K_PKE_DK_SIZE + ML_KEM_EK_SIZE));
 }
 
 // ── Public API ───────────────────────────────────────────────────
@@ -438,11 +453,11 @@ function mlKemKeygen(seed) {
   const hEk = sha3_256(ekPke);
 
   // DK = dkPke || ekPke || H(ekPke) || z
-  const dk = new Uint8Array(2400);
+  const dk = new Uint8Array(ML_KEM_DK_SIZE);
   dk.set(dkPke);
-  dk.set(ekPke, 384 * K);
-  dk.set(hEk, 384 * K + 1184);
-  dk.set(z, 384 * K + 1184 + 32);
+  dk.set(ekPke, K_PKE_DK_SIZE);
+  dk.set(hEk, K_PKE_DK_SIZE + ML_KEM_EK_SIZE);
+  dk.set(z, K_PKE_DK_SIZE + ML_KEM_EK_SIZE + 32);
 
   return { ek: new Uint8Array(ekPke), dk };
 }
@@ -464,6 +479,9 @@ function mlKemEncaps(ek, randomness) {
   const r = gOutput.subarray(32, 64);
 
   const ct = kPkeEncrypt(ek, m, r);
+  if (ct.length !== ML_KEM_CT_SIZE) {
+    throw new Error(`ML-KEM-768 ciphertext must be ${ML_KEM_CT_SIZE} bytes, got ${ct.length}`);
+  }
 
   return { ct, ss: new Uint8Array(Kss) };
 }
@@ -471,13 +489,16 @@ function mlKemEncaps(ek, randomness) {
 function mlKemDecaps(dk, ct) {
   if (!(dk instanceof Uint8Array)) throw new Error("dk must be a Uint8Array");
   if (!(ct instanceof Uint8Array)) throw new Error("ct must be a Uint8Array");
-  if (ct.length !== 1088) throw new Error(`ML-KEM-768 decaps requires 1088-byte CT, got ${ct.length}`);
+  if (ct.length !== ML_KEM_CT_SIZE) throw new Error(`ML-KEM-768 decaps requires ${ML_KEM_CT_SIZE}-byte CT, got ${ct.length}`);
   if (!dkHashCheck(dk)) throw new Error("Decapsulation key failed FIPS 203 hash check (§7.2)");
 
-  const dkPke = dk.subarray(0, 384 * K);
-  const ekPke = dk.subarray(384 * K, 384 * K + 1184);
-  const h = dk.subarray(384 * K + 1184, 384 * K + 1184 + 32);
-  const z = dk.subarray(384 * K + 1184 + 32);
+  const dkPke = dk.subarray(0, K_PKE_DK_SIZE);
+  const ekPke = mlKemEkFromDk(dk);
+  const h = dk.subarray(
+    K_PKE_DK_SIZE + ML_KEM_EK_SIZE,
+    K_PKE_DK_SIZE + ML_KEM_EK_SIZE + 32
+  );
+  const z = dk.subarray(K_PKE_DK_SIZE + ML_KEM_EK_SIZE + 32);
 
   const mPrime = kPkeDecrypt(dkPke, ct);
 
@@ -506,9 +527,21 @@ function mlKemDecaps(dk, ct) {
   return result;
 }
 
-const EK_SIZE = 1184;
-const DK_SIZE = 2400;
-const CT_SIZE = 1088;
-const SS_SIZE = 32;
+const EK_SIZE = ML_KEM_EK_SIZE;
+const DK_SIZE = ML_KEM_DK_SIZE;
+const CT_SIZE = ML_KEM_CT_SIZE;
+const SS_SIZE = ML_KEM_SS_SIZE;
 
-module.exports = { mlKemKeygen, mlKemEncaps, mlKemDecaps, EK_SIZE, DK_SIZE, CT_SIZE, SS_SIZE };
+module.exports = {
+  mlKemKeygen,
+  mlKemEncaps,
+  mlKemDecaps,
+  mlKemEkFromDk,
+  ML_KEM_EK_SIZE,
+  ML_KEM_DK_SIZE,
+  ML_KEM_CT_SIZE,
+  EK_SIZE,
+  DK_SIZE,
+  CT_SIZE,
+  SS_SIZE,
+};

@@ -3682,6 +3682,12 @@ const ETA2 = 2;
 const DU = 10;
 const DV = 4;
 
+const ML_KEM_EK_SIZE = 1184;
+const ML_KEM_DK_SIZE = 2400;
+const ML_KEM_CT_SIZE = 1088;
+const ML_KEM_SS_SIZE = 32;
+const K_PKE_DK_SIZE = 384 * K;
+
 // ── NTT Constants ────────────────────────────────────────────────
 
 function bitrev7(n) {
@@ -3936,7 +3942,7 @@ function kPkeKeygen(d) {
   }
 
   // Encode ek = t_hat || rho
-  let ekLen = 384 * K + 32;
+  let ekLen = K_PKE_DK_SIZE + 32;
   const ekPke = new Uint8Array(ekLen);
   let offset = 0;
   for (let i = 0; i < K; i++) {
@@ -3946,7 +3952,7 @@ function kPkeKeygen(d) {
   ekPke.set(rho, offset);
 
   // dk = encode(s)
-  const dkPke = new Uint8Array(384 * K);
+  const dkPke = new Uint8Array(K_PKE_DK_SIZE);
   offset = 0;
   for (let i = 0; i < K; i++) {
     dkPke.set(byteEncode(s[i], 12), offset);
@@ -4065,7 +4071,7 @@ const { randomBytes, constantTimeEqual } = require("./utils");
 // ── FIPS 203 Input Validation (§7.1, §7.2) ──────────────────────
 
 function ekModulusCheck(ek) {
-  if (ek.length !== 1184) return false;
+  if (ek.length !== ML_KEM_EK_SIZE) return false;
   // Constant-time: check all chunks without early return
   let valid = 1;
   for (let i = 0; i < K; i++) {
@@ -4077,10 +4083,19 @@ function ekModulusCheck(ek) {
 }
 
 function dkHashCheck(dk) {
-  if (dk.length !== 2400) return false;
-  const ek = dk.subarray(384 * K, 384 * K + 1184);
-  const hStored = dk.subarray(384 * K + 1184, 384 * K + 1184 + 32);
+  if (dk.length !== ML_KEM_DK_SIZE) return false;
+  const ek = dk.subarray(K_PKE_DK_SIZE, K_PKE_DK_SIZE + ML_KEM_EK_SIZE);
+  const hStored = dk.subarray(
+    K_PKE_DK_SIZE + ML_KEM_EK_SIZE,
+    K_PKE_DK_SIZE + ML_KEM_EK_SIZE + 32
+  );
   return constantTimeEqual(sha3_256(ek), hStored);
+}
+
+function mlKemEkFromDk(dk) {
+  if (!(dk instanceof Uint8Array)) throw new Error("dk must be a Uint8Array");
+  if (!dkHashCheck(dk)) throw new Error("Decapsulation key failed FIPS 203 hash check (§7.2)");
+  return new Uint8Array(dk.subarray(K_PKE_DK_SIZE, K_PKE_DK_SIZE + ML_KEM_EK_SIZE));
 }
 
 // ── Public API ───────────────────────────────────────────────────
@@ -4097,11 +4112,11 @@ function mlKemKeygen(seed) {
   const hEk = sha3_256(ekPke);
 
   // DK = dkPke || ekPke || H(ekPke) || z
-  const dk = new Uint8Array(2400);
+  const dk = new Uint8Array(ML_KEM_DK_SIZE);
   dk.set(dkPke);
-  dk.set(ekPke, 384 * K);
-  dk.set(hEk, 384 * K + 1184);
-  dk.set(z, 384 * K + 1184 + 32);
+  dk.set(ekPke, K_PKE_DK_SIZE);
+  dk.set(hEk, K_PKE_DK_SIZE + ML_KEM_EK_SIZE);
+  dk.set(z, K_PKE_DK_SIZE + ML_KEM_EK_SIZE + 32);
 
   return { ek: new Uint8Array(ekPke), dk };
 }
@@ -4123,6 +4138,9 @@ function mlKemEncaps(ek, randomness) {
   const r = gOutput.subarray(32, 64);
 
   const ct = kPkeEncrypt(ek, m, r);
+  if (ct.length !== ML_KEM_CT_SIZE) {
+    throw new Error(`ML-KEM-768 ciphertext must be ${ML_KEM_CT_SIZE} bytes, got ${ct.length}`);
+  }
 
   return { ct, ss: new Uint8Array(Kss) };
 }
@@ -4130,13 +4148,16 @@ function mlKemEncaps(ek, randomness) {
 function mlKemDecaps(dk, ct) {
   if (!(dk instanceof Uint8Array)) throw new Error("dk must be a Uint8Array");
   if (!(ct instanceof Uint8Array)) throw new Error("ct must be a Uint8Array");
-  if (ct.length !== 1088) throw new Error(`ML-KEM-768 decaps requires 1088-byte CT, got ${ct.length}`);
+  if (ct.length !== ML_KEM_CT_SIZE) throw new Error(`ML-KEM-768 decaps requires ${ML_KEM_CT_SIZE}-byte CT, got ${ct.length}`);
   if (!dkHashCheck(dk)) throw new Error("Decapsulation key failed FIPS 203 hash check (§7.2)");
 
-  const dkPke = dk.subarray(0, 384 * K);
-  const ekPke = dk.subarray(384 * K, 384 * K + 1184);
-  const h = dk.subarray(384 * K + 1184, 384 * K + 1184 + 32);
-  const z = dk.subarray(384 * K + 1184 + 32);
+  const dkPke = dk.subarray(0, K_PKE_DK_SIZE);
+  const ekPke = mlKemEkFromDk(dk);
+  const h = dk.subarray(
+    K_PKE_DK_SIZE + ML_KEM_EK_SIZE,
+    K_PKE_DK_SIZE + ML_KEM_EK_SIZE + 32
+  );
+  const z = dk.subarray(K_PKE_DK_SIZE + ML_KEM_EK_SIZE + 32);
 
   const mPrime = kPkeDecrypt(dkPke, ct);
 
@@ -4165,12 +4186,24 @@ function mlKemDecaps(dk, ct) {
   return result;
 }
 
-const EK_SIZE = 1184;
-const DK_SIZE = 2400;
-const CT_SIZE = 1088;
-const SS_SIZE = 32;
+const EK_SIZE = ML_KEM_EK_SIZE;
+const DK_SIZE = ML_KEM_DK_SIZE;
+const CT_SIZE = ML_KEM_CT_SIZE;
+const SS_SIZE = ML_KEM_SS_SIZE;
 
-module.exports = { mlKemKeygen, mlKemEncaps, mlKemDecaps, EK_SIZE, DK_SIZE, CT_SIZE, SS_SIZE };
+module.exports = {
+  mlKemKeygen,
+  mlKemEncaps,
+  mlKemDecaps,
+  mlKemEkFromDk,
+  ML_KEM_EK_SIZE,
+  ML_KEM_DK_SIZE,
+  ML_KEM_CT_SIZE,
+  EK_SIZE,
+  DK_SIZE,
+  CT_SIZE,
+  SS_SIZE,
+};
 
 };
 
@@ -5525,16 +5558,24 @@ _modules["./crypto/hybrid_kem"] = function(module, exports, require) {
 // Best-effort constant-time. For hardware side-channel resistance, use C/Rust.
 
 const { x25519Keygen, x25519, x25519NoCheck } = require("./x25519");
-const { mlKemKeygen, mlKemEncaps, mlKemDecaps } = require("./ml_kem");
+const {
+  ML_KEM_CT_SIZE,
+  ML_KEM_DK_SIZE,
+  ML_KEM_EK_SIZE,
+  mlKemKeygen,
+  mlKemEncaps,
+  mlKemDecaps,
+  mlKemEkFromDk,
+} = require("./ml_kem");
 const { sha256, hmacSha256 } = require("./sha2");
 const { randomBytes, zeroize } = require("./utils");
 
 // Component sizes
 const _X25519_SK = 32;
 const _X25519_PK = 32;
-const _ML_KEM_EK = 1184;
-const _ML_KEM_DK = 2400;
-const _ML_KEM_CT = 1088;
+const _ML_KEM_EK = ML_KEM_EK_SIZE;
+const _ML_KEM_DK = ML_KEM_DK_SIZE;
+const _ML_KEM_CT = ML_KEM_CT_SIZE;
 
 // Hybrid sizes
 const HYBRID_KEM_EK_SIZE = _X25519_PK + _ML_KEM_EK;    // 1,216
@@ -5680,7 +5721,7 @@ function hybridKemDecaps(dk, ct) {
 
   // Recover receiver public keys from dk for HKDF binding
   const xPk = x25519Keygen(xSk).pk;
-  const mlEk = mlDk.subarray(384 * 3, 384 * 3 + _ML_KEM_EK);
+  const mlEk = mlKemEkFromDk(mlDk);
 
   // X25519 shared secret recovery — constant-time, no throw on low-order points.
   // If ephPk is a low-order point, result may be all-zero; ML-KEM carries security.
@@ -6110,7 +6151,15 @@ const { sha3_256, sha3_512, shake128, shake256, shake128Xof, shake256Xof } = req
 const { sha256, sha512, hmacSha256, hmacSha512, hkdfExpand, hkdfExpandSha256, hkdfExtractSha256, pbkdf2Sha512, pbkdf2Sha512Async } = require("./sha2");
 const { mlKeygen, mlSign, mlVerify, mlSignWithContext, mlVerifyWithContext, mlSignAsync, mlVerifyAsync } = require("./ml_dsa");
 const { slhKeygen, slhSign, slhVerify, slhSignWithContext, slhVerifyWithContext, slhSignAsync, slhVerifyAsync } = require("./slh_dsa");
-const { mlKemKeygen, mlKemEncaps, mlKemDecaps } = require("./ml_kem");
+const {
+  ML_KEM_CT_SIZE,
+  ML_KEM_DK_SIZE,
+  ML_KEM_EK_SIZE,
+  mlKemKeygen,
+  mlKemEncaps,
+  mlKemDecaps,
+  mlKemEkFromDk,
+} = require("./ml_kem");
 const { ed25519Keygen, ed25519Sign, ed25519Verify } = require("./ed25519");
 const { x25519Keygen, x25519 } = require("./x25519");
 const { hybridDsaKeygen, hybridDsaSign, hybridDsaVerify } = require("./hybrid_dsa");
@@ -6132,7 +6181,8 @@ module.exports = {
   slhKeygen, slhSign, slhVerify, slhSignWithContext, slhVerifyWithContext, slhSignAsync, slhVerifyAsync,
 
   // ML-KEM-768 (FIPS 203) — Post-quantum key encapsulation
-  mlKemKeygen, mlKemEncaps, mlKemDecaps,
+  mlKemKeygen, mlKemEncaps, mlKemDecaps, mlKemEkFromDk,
+  ML_KEM_EK_SIZE, ML_KEM_DK_SIZE, ML_KEM_CT_SIZE,
 
   // Ed25519 (RFC 8032) — Classical digital signature
   ed25519Keygen, ed25519Sign, ed25519Verify,
@@ -6496,10 +6546,9 @@ async function getSeedAsync(words, passphrase = "") {
 }
 
 function getProfile(masterKey, profilePassword) {
-  if (!profilePassword) return masterKey;
   // NFKC normalization prevents cross-platform derivation differences
   // (e.g., macOS NFD vs Windows NFC for accented characters)
-  const normalizedPw = profilePassword.normalize("NFKC");
+  const normalizedPw = (profilePassword == null ? "" : String(profilePassword)).normalize("NFKC");
   const payload = concatBytes(DOMAIN, toBytes("-profile"), toBytes(normalizedPw));
   const derived = hmacSha512(masterKey, payload);
   zeroize(payload);
@@ -6726,6 +6775,10 @@ module.exports = {
   mlKemKeygen: crypto.mlKemKeygen,
   mlKemEncaps: crypto.mlKemEncaps,
   mlKemDecaps: crypto.mlKemDecaps,
+  mlKemEkFromDk: crypto.mlKemEkFromDk,
+  ML_KEM_EK_SIZE: crypto.ML_KEM_EK_SIZE,
+  ML_KEM_DK_SIZE: crypto.ML_KEM_DK_SIZE,
+  ML_KEM_CT_SIZE: crypto.ML_KEM_CT_SIZE,
 
   // Ed25519 (RFC 8032)
   ed25519Keygen: crypto.ed25519Keygen,

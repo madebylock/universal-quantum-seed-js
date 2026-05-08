@@ -167,6 +167,10 @@ module.exports = {
   mlKemKeygen: crypto.mlKemKeygen,
   mlKemEncaps: crypto.mlKemEncaps,
   mlKemDecaps: crypto.mlKemDecaps,
+  mlKemEkFromDk: crypto.mlKemEkFromDk,
+  ML_KEM_EK_SIZE: crypto.ML_KEM_EK_SIZE,
+  ML_KEM_DK_SIZE: crypto.ML_KEM_DK_SIZE,
+  ML_KEM_CT_SIZE: crypto.ML_KEM_CT_SIZE,
 
   // Ed25519 (RFC 8032)
   ed25519Keygen: crypto.ed25519Keygen,
