@@ -498,6 +498,11 @@ function collectEntropy(nBytes, extraEntropy) {
 // ── Checksum ────────────────────────────────────────────────────
 
 function computeChecksum(indexes) {
+  // Intentional: this checksum detects transcription mistakes; it is not an
+  // authenticity check. Two 8-bit words give 16 bits of error detection,
+  // stronger than BIP39's 24-word checksum, while preserving the seed format.
+  // Widening it would remove entropy words and break existing seed recovery
+  // unless introduced as a separate versioned format.
   const key = concatBytes(DOMAIN, toBytes("-checksum"));
   const digest = hmacSha256(key, new Uint8Array(indexes));
   return [digest[0], digest[1]];
