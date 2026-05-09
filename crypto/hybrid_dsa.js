@@ -59,21 +59,12 @@ function _ed25519Message(message, ctx) {
 }
 
 // ML-DSA message: domain || len(ctx) || ctx || message
-// Current signatures use empty FIPS context so the pqcrypto backend can
-// sign the component. The domain and caller context are still bound into
-// the signed bytes, so the ML-DSA signature remains non-portable outside
-// the hybrid scheme. _mlDsaCtx() is retained for legacy verification of
-// signatures produced by older clients.
+// Signs with empty FIPS context so the pqcrypto C backend can sign the
+// component. The domain and caller context are still bound into the signed
+// bytes, so the ML-DSA signature remains non-portable outside the hybrid
+// scheme.
 function _mlDsaMessage(message, ctx) {
   return _ed25519Message(message, ctx);
-}
-
-function _mlDsaCtx(ctx) {
-  const out = new Uint8Array(_DOMAIN.length + 1 + ctx.length);
-  out.set(_DOMAIN);
-  out[_DOMAIN.length] = 0x00;
-  out.set(ctx, _DOMAIN.length + 1);
-  return out;
 }
 
 /**
@@ -168,15 +159,7 @@ function hybridDsaVerify(message, sig, pk, ctx) {
 
   // ML-DSA: verify domain-prefixed message with empty FIPS context.
   const mlMsg = _mlDsaMessage(message, ctx);
-  let mlOk = mlVerifyWithContext(mlMsg, mlSig, mlPk, new Uint8Array(0));
-  if (!mlOk) {
-    // Legacy fallback: signatures from older clients used a domain-separated
-    // FIPS context with the raw message body.
-    const legacyCtx = _mlDsaCtx(ctx);
-    if (legacyCtx.length <= 255) {
-      mlOk = mlVerifyWithContext(message, mlSig, mlPk, legacyCtx);
-    }
-  }
+  const mlOk = mlVerifyWithContext(mlMsg, mlSig, mlPk, new Uint8Array(0));
 
   return edOk && mlOk;
 }
