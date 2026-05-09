@@ -87,7 +87,7 @@ const hSs2 = uqs.hybridKemDecaps(hybridKemKp.sk, hCt);
 |----------|-------------|
 | `getSeed(indexes, passphrase?)` | Derive 64-byte master key (PBKDF2-SHA512) |
 | `getProfile(masterKey, password?)` | Derive profile key |
-| `getFingerprint(seed, passphrase?)` | 8-char hex fingerprint |
+| `getFingerprint(seed, passphrase?, { bits })` | Uppercase hex fingerprint; `bits` ∈ {32, 64, 128, 256} (default 32 → 8 chars) |
 | `getEntropyBits(wordCount, passphrase?)` | Calculate entropy bits |
 
 ### Post-Quantum Cryptography
