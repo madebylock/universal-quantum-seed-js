@@ -2084,22 +2084,29 @@ try {
 
 // ── Public API ──────────────────────────────────────────────────
 
-function ed25519Keygen(seed) {
+function _publicKeyFromSeed(seed) {
   if (!(seed instanceof Uint8Array) || seed.length !== 32) {
     throw new Error("Ed25519 seed must be a 32-byte Uint8Array");
   }
-  if (_nativeKeygen) return _nativeKeygen(seed);
+  if (_nativeKeygen) return _nativeKeygen(seed).pk;
 
   const h = sha512(seed);
   const a = bytesToBigIntLE(clamp(h));
   const pkPoint = scalarMultBase(a);
   const pkBytes = encodePoint(pkPoint);
+  zeroize(h);
+  return pkBytes;
+}
 
+function ed25519Keygen(seed) {
+  if (!(seed instanceof Uint8Array) || seed.length !== 32) {
+    throw new Error("Ed25519 seed must be a 32-byte Uint8Array");
+  }
+  const pkBytes = _publicKeyFromSeed(seed);
   // sk = seed || pk
   const sk = new Uint8Array(64);
   sk.set(seed);
   sk.set(pkBytes, 32);
-
   return { sk, pk: pkBytes };
 }
 
@@ -2108,10 +2115,14 @@ function ed25519Sign(message, skBytes) {
   if (!(skBytes instanceof Uint8Array) || skBytes.length !== 64) {
     throw new Error("Ed25519 sk must be a 64-byte Uint8Array");
   }
-  if (_nativeSign) return _nativeSign(message, skBytes.subarray(0, 32));
-
   const seed = skBytes.subarray(0, 32);
   const pkBytes = skBytes.subarray(32, 64);
+  const derivedPk = _publicKeyFromSeed(seed);
+  if (!constantTimeEqual(pkBytes, derivedPk)) {
+    throw new Error("Ed25519 secret key public key does not match seed");
+  }
+
+  if (_nativeSign) return _nativeSign(message, skBytes.subarray(0, 32));
 
   const h = sha512(seed);
   const a = bytesToBigIntLE(clamp(h));
@@ -5441,8 +5452,8 @@ _modules["./crypto/hybrid_dsa"] = function(module, exports, require) {
 // Stripping resistance: BOTH component signatures are domain-separated so
 // neither can be extracted and used as a valid standalone signature:
 //     Ed25519 signs: "hybrid-dsa-v1" || len(ctx) || ctx || message
-//     ML-DSA uses ctx: "hybrid-dsa-v1" || 0x00 || ctx (within FIPS 204
-//       pure-mode formatting, which prepends 0x00 || len(ctx) internally)
+//     ML-DSA signs the same domain-prefixed message with empty FIPS context,
+//       allowing the pqcrypto backend while preserving stripping resistance.
 //
 // Sizes:
 //     Secret key:  4,096 bytes  (Ed25519 sk 64B + ML-DSA-65 sk 4,032B)
@@ -5474,8 +5485,8 @@ const _DOMAIN = new TextEncoder().encode("hybrid-dsa-v1");
 // Ed25519 message: domain || len(ctx) || ctx || message
 // Prevents Ed25519 signature from being used standalone.
 function _ed25519Message(message, ctx) {
-  if (ctx.length > 241) {
-    throw new Error(`Context string must be 0-241 bytes, got ${ctx.length}`);
+  if (ctx.length > 255) {
+    throw new Error(`Context string must be 0-255 bytes, got ${ctx.length}`);
   }
   const out = new Uint8Array(_DOMAIN.length + 1 + ctx.length + message.length);
   out.set(_DOMAIN);
@@ -5485,9 +5496,16 @@ function _ed25519Message(message, ctx) {
   return out;
 }
 
-// ML-DSA context: domain || 0x00 || ctx
-// Used as FIPS 204 pure-mode context. The 0x00 separator prevents
-// ambiguity with the Ed25519 component's length prefix.
+// ML-DSA message: domain || len(ctx) || ctx || message
+// Current signatures use empty FIPS context so the pqcrypto backend can
+// sign the component. The domain and caller context are still bound into
+// the signed bytes, so the ML-DSA signature remains non-portable outside
+// the hybrid scheme. _mlDsaCtx() is retained for legacy verification of
+// signatures produced by older clients.
+function _mlDsaMessage(message, ctx) {
+  return _ed25519Message(message, ctx);
+}
+
 function _mlDsaCtx(ctx) {
   const out = new Uint8Array(_DOMAIN.length + 1 + ctx.length);
   out.set(_DOMAIN);
@@ -5536,6 +5554,9 @@ function hybridDsaSign(message, sk, ctx) {
   if (sk.length !== HYBRID_DSA_SK_SIZE) {
     throw new Error(`Hybrid DSA sk must be ${HYBRID_DSA_SK_SIZE} bytes, got ${sk.length}`);
   }
+  if (ctx.length > 255) {
+    throw new Error(`Context string must be 0-255 bytes for hybrid DSA, got ${ctx.length}`);
+  }
 
   const edSk = sk.subarray(0, _ED25519_SK);
   const mlSk = sk.subarray(_ED25519_SK);
@@ -5545,9 +5566,10 @@ function hybridDsaSign(message, sk, ctx) {
   const edSig = ed25519Sign(edMsg, edSk);
   zeroize(edMsg);
 
-  // ML-DSA: signs raw message with domain-separated context (FIPS 204 pure mode)
-  const mlCtx = _mlDsaCtx(ctx);
-  const mlSig = mlSignWithContext(message, mlSk, mlCtx);
+  // ML-DSA: signs domain-prefixed message with empty FIPS context so
+  // pqcrypto can provide the production signing backend.
+  const mlMsg = _mlDsaMessage(message, ctx);
+  const mlSig = mlSignWithContext(mlMsg, mlSk, new Uint8Array(0));
 
   const sig = new Uint8Array(HYBRID_DSA_SIG_SIZE);
   sig.set(edSig);
@@ -5571,6 +5593,7 @@ function hybridDsaVerify(message, sig, pk, ctx) {
   else ctx = toBytes(ctx);
   if (sig.length !== HYBRID_DSA_SIG_SIZE) return false;
   if (pk.length !== HYBRID_DSA_PK_SIZE) return false;
+  if (ctx.length > 255) return false;
 
   const edSig = sig.subarray(0, _ED25519_SIG);
   const mlSig = sig.subarray(_ED25519_SIG);
@@ -5581,9 +5604,17 @@ function hybridDsaVerify(message, sig, pk, ctx) {
   const edMsg = _ed25519Message(message, ctx);
   const edOk = ed25519Verify(edMsg, edSig, edPk);
 
-  // ML-DSA: verify raw message with domain-separated context (FIPS 204 pure mode)
-  const mlCtx = _mlDsaCtx(ctx);
-  const mlOk = mlVerifyWithContext(message, mlSig, mlPk, mlCtx);
+  // ML-DSA: verify domain-prefixed message with empty FIPS context.
+  const mlMsg = _mlDsaMessage(message, ctx);
+  let mlOk = mlVerifyWithContext(mlMsg, mlSig, mlPk, new Uint8Array(0));
+  if (!mlOk) {
+    // Legacy fallback: signatures from older clients used a domain-separated
+    // FIPS context with the raw message body.
+    const legacyCtx = _mlDsaCtx(ctx);
+    if (legacyCtx.length <= 255) {
+      mlOk = mlVerifyWithContext(message, mlSig, mlPk, legacyCtx);
+    }
+  }
 
   return edOk && mlOk;
 }
@@ -6619,6 +6650,7 @@ function zeroize(buf) {
 }
 
 function packLE_BB(a, b) { return new Uint8Array([a & 0xff, b & 0xff]); }
+function packLE_H(n) { return new Uint8Array([n & 0xff, (n >> 8) & 0xff]); }
 function packLE_I(n) { return new Uint8Array([n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >> 24) & 0xff]); }
 function packLE_Q(n) {
   const buf = new Uint8Array(8);
@@ -7034,6 +7066,34 @@ function toIndexes(seed) {
 
 // ── Key Derivation ──────────────────────────────────────────────
 
+function _passphraseToBytes(passphrase) {
+  // NFKC normalization prevents cross-platform fund loss from different
+  // Unicode representations of the same visual characters (macOS NFD vs
+  // Windows NFC).
+  if (!passphrase) return new Uint8Array(0);
+  return toBytes(passphrase.normalize("NFKC"));
+}
+
+function _buildSeedPayload(indexes, passphrase = "") {
+  // Build the length-prefixed, domain-separated UQS v1 seed payload.
+  // Layout: domain + word-count (uint16 LE) + per-position (pos, idx) pairs
+  // + b"\x01passphrase" tag + passphrase length (uint32 LE) + passphrase bytes.
+  // Each field is length- or domain-tagged so the boundary between the index
+  // region and the passphrase is unambiguous (prevents cross-length collisions).
+  const passphraseBytes = _passphraseToBytes(passphrase);
+  const parts = [
+    concatBytes(DOMAIN, toBytes("-seed-payload-v1")),
+    packLE_H(indexes.length),
+  ];
+  for (let pos = 0; pos < indexes.length; pos++) {
+    parts.push(packLE_BB(pos, indexes[pos]));
+  }
+  parts.push(toBytes("\x01passphrase"));
+  parts.push(packLE_I(passphraseBytes.length));
+  parts.push(passphraseBytes);
+  return concatBytes(...parts);
+}
+
 function getSeed(words, passphrase = "") {
   const indexes = toIndexes(words);
   if (indexes.length !== 24 && indexes.length !== 36) {
@@ -7049,19 +7109,14 @@ function getSeed(words, passphrase = "") {
     throw new Error("invalid seed checksum");
   }
 
-  // Step 1: Position-tagged payload
-  const payloadParts = [];
-  for (let pos = 0; pos < data.length; pos++) {
-    payloadParts.push(packLE_BB(pos, data[pos]));
-  }
-  if (passphrase) payloadParts.push(toBytes(passphrase.normalize("NFKC")));
-  const payload = concatBytes(...payloadParts);
+  // Step 1-2: Build a versioned, position-tagged, length-prefixed payload.
+  const payload = _buildSeedPayload(data, passphrase);
 
-  // Step 2: HKDF-Extract
+  // Step 3: HKDF-Extract
   const prk = hmacSha512(DOMAIN, payload);
   zeroize(payload);
 
-  // Step 3: Chained KDF — PBKDF2-SHA512 → Argon2id (defense in depth)
+  // Step 4: Chained KDF — PBKDF2-SHA512 → Argon2id (defense in depth)
   const salt = concatBytes(DOMAIN, toBytes("-stretch"));
   const stage1 = pbkdf2Sha512(prk, concatBytes(salt, toBytes("-pbkdf2")), PBKDF2_ITERATIONS, 64);
   zeroize(prk);
@@ -7072,7 +7127,7 @@ function getSeed(words, passphrase = "") {
   );
   zeroize(stage1);
 
-  // Step 4: HKDF-Expand
+  // Step 5: HKDF-Expand
   const master = hkdfExpand(stretched, concatBytes(DOMAIN, toBytes("-master")), 64);
   zeroize(stretched);
   return master;
@@ -7093,12 +7148,8 @@ async function getSeedAsync(words, passphrase = "") {
     throw new Error("invalid seed checksum");
   }
 
-  const payloadParts = [];
-  for (let pos = 0; pos < data.length; pos++) {
-    payloadParts.push(packLE_BB(pos, data[pos]));
-  }
-  if (passphrase) payloadParts.push(toBytes(passphrase.normalize("NFKC")));
-  const payload = concatBytes(...payloadParts);
+  // Build a versioned, position-tagged, length-prefixed payload.
+  const payload = _buildSeedPayload(data, passphrase);
 
   const prk = hmacSha512(DOMAIN, payload);
   zeroize(payload);
@@ -7191,6 +7242,35 @@ function generateQuantumKeypair(masterKey, algorithm = "ml-dsa-65", keyIndex = 0
 
 // ── Word Generation ─────────────────────────────────────────────
 
+const ENTROPY_HEALTH_SAMPLES = 5;
+const ENTROPY_HEALTH_MIN_PASSES = 3;
+
+function _entropyTestsPass(tests) {
+  return Object.values(tests).every(t => t.pass);
+}
+
+function _validateEntropyPipeline(extraEntropy = null) {
+  // Statistical tests naturally produce occasional outliers, so seed creation
+  // uses a fixed batch and majority decision instead of conditioning generation
+  // on the first sample that happens to pass. A broken source fails closed.
+  const samples = [];
+  let passCount = 0;
+  for (let i = 0; i < ENTROPY_HEALTH_SAMPLES; i++) {
+    const testSample = collectEntropy(1024, extraEntropy);
+    const tests = testEntropy(testSample);
+    const passed = _entropyTestsPass(tests);
+    if (passed) passCount++;
+    samples.push({ sample: i, pass: passed, tests });
+  }
+  return {
+    pass: passCount >= ENTROPY_HEALTH_MIN_PASSES,
+    passed: passCount,
+    required: ENTROPY_HEALTH_MIN_PASSES,
+    total: ENTROPY_HEALTH_SAMPLES,
+    samples,
+  };
+}
+
 function generateWords(wordCount = 36, extraEntropy = null, language = null) {
   if (wordCount !== 24 && wordCount !== 36) {
     throw new Error("wordCount must be 24 or 36");
@@ -7207,27 +7287,35 @@ function generateWords(wordCount = 36, extraEntropy = null, language = null) {
     }
   }
 
-  // Validate entropy (simplified: single test)
-  for (let attempt = 0; attempt < 10; attempt++) {
-    const testSample = collectEntropy(1024, extraEntropy);
-    const tests = testEntropy(testSample);
-    const allPass = Object.values(tests).every(t => t.pass);
-    if (allPass) {
-      const entropy = collectEntropy(dataCount, extraEntropy);
-      const indexes = [...entropy];
-      indexes.push(...computeChecksum(indexes));
-      return indexes.map((idx, pos) => ({ index: idx, word: wordMap[idx] || String(idx) }));
-    }
+  const health = _validateEntropyPipeline(extraEntropy);
+  if (!health.pass) {
+    throw new Error(
+      `Entropy failed validation (${health.passed}/${health.total} samples passed; ` +
+      `${health.required} required) -- RNG source may be compromised. ` +
+      "Do NOT generate seeds on this system."
+    );
   }
-  throw new Error("Entropy failed validation 10 times -- RNG may be compromised.");
+
+  const entropy = collectEntropy(dataCount, extraEntropy);
+  const indexes = [...entropy];
+  indexes.push(...computeChecksum(indexes));
+  return indexes.map((idx, pos) => ({ index: idx, word: wordMap[idx] || String(idx) }));
 }
 
 // ── Fingerprint ─────────────────────────────────────────────────
 
-function getFingerprint(seed, passphrase = "") {
+const FINGERPRINT_BITS = [32, 64, 128, 256];
+
+function getFingerprint(seed, passphrase = "", { bits = 32 } = {}) {
+  // Output strength selectable: 32 (default, 8 hex chars, BIP-32-style typo
+  // detection), 64, 128, or 256 (full SHA-256, 64 hex chars).
+  if (!FINGERPRINT_BITS.includes(bits)) {
+    throw new Error(`bits must be one of ${FINGERPRINT_BITS.join(", ")}, got ${bits}`);
+  }
   const key = getSeed(seed, passphrase);
   const hash = sha256(key);
-  return Array.from(hash.subarray(0, 4), b => b.toString(16).padStart(2, "0")).join("").toUpperCase();
+  const byteLen = bits / 8;
+  return Array.from(hash.subarray(0, byteLen), b => b.toString(16).padStart(2, "0")).join("").toUpperCase();
 }
 
 // ── Entropy Bits ────────────────────────────────────────────────

@@ -291,22 +291,29 @@ try {
 
 // ── Public API ──────────────────────────────────────────────────
 
-function ed25519Keygen(seed) {
+function _publicKeyFromSeed(seed) {
   if (!(seed instanceof Uint8Array) || seed.length !== 32) {
     throw new Error("Ed25519 seed must be a 32-byte Uint8Array");
   }
-  if (_nativeKeygen) return _nativeKeygen(seed);
+  if (_nativeKeygen) return _nativeKeygen(seed).pk;
 
   const h = sha512(seed);
   const a = bytesToBigIntLE(clamp(h));
   const pkPoint = scalarMultBase(a);
   const pkBytes = encodePoint(pkPoint);
+  zeroize(h);
+  return pkBytes;
+}
 
+function ed25519Keygen(seed) {
+  if (!(seed instanceof Uint8Array) || seed.length !== 32) {
+    throw new Error("Ed25519 seed must be a 32-byte Uint8Array");
+  }
+  const pkBytes = _publicKeyFromSeed(seed);
   // sk = seed || pk
   const sk = new Uint8Array(64);
   sk.set(seed);
   sk.set(pkBytes, 32);
-
   return { sk, pk: pkBytes };
 }
 
@@ -315,10 +322,14 @@ function ed25519Sign(message, skBytes) {
   if (!(skBytes instanceof Uint8Array) || skBytes.length !== 64) {
     throw new Error("Ed25519 sk must be a 64-byte Uint8Array");
   }
-  if (_nativeSign) return _nativeSign(message, skBytes.subarray(0, 32));
-
   const seed = skBytes.subarray(0, 32);
   const pkBytes = skBytes.subarray(32, 64);
+  const derivedPk = _publicKeyFromSeed(seed);
+  if (!constantTimeEqual(pkBytes, derivedPk)) {
+    throw new Error("Ed25519 secret key public key does not match seed");
+  }
+
+  if (_nativeSign) return _nativeSign(message, skBytes.subarray(0, 32));
 
   const h = sha512(seed);
   const a = bytesToBigIntLE(clamp(h));

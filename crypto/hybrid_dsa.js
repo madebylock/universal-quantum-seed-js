@@ -14,8 +14,8 @@
 // Stripping resistance: BOTH component signatures are domain-separated so
 // neither can be extracted and used as a valid standalone signature:
 //     Ed25519 signs: "hybrid-dsa-v1" || len(ctx) || ctx || message
-//     ML-DSA uses ctx: "hybrid-dsa-v1" || 0x00 || ctx (within FIPS 204
-//       pure-mode formatting, which prepends 0x00 || len(ctx) internally)
+//     ML-DSA signs the same domain-prefixed message with empty FIPS context,
+//       allowing the pqcrypto backend while preserving stripping resistance.
 //
 // Sizes:
 //     Secret key:  4,096 bytes  (Ed25519 sk 64B + ML-DSA-65 sk 4,032B)
@@ -47,8 +47,8 @@ const _DOMAIN = new TextEncoder().encode("hybrid-dsa-v1");
 // Ed25519 message: domain || len(ctx) || ctx || message
 // Prevents Ed25519 signature from being used standalone.
 function _ed25519Message(message, ctx) {
-  if (ctx.length > 241) {
-    throw new Error(`Context string must be 0-241 bytes, got ${ctx.length}`);
+  if (ctx.length > 255) {
+    throw new Error(`Context string must be 0-255 bytes, got ${ctx.length}`);
   }
   const out = new Uint8Array(_DOMAIN.length + 1 + ctx.length + message.length);
   out.set(_DOMAIN);
@@ -58,9 +58,16 @@ function _ed25519Message(message, ctx) {
   return out;
 }
 
-// ML-DSA context: domain || 0x00 || ctx
-// Used as FIPS 204 pure-mode context. The 0x00 separator prevents
-// ambiguity with the Ed25519 component's length prefix.
+// ML-DSA message: domain || len(ctx) || ctx || message
+// Current signatures use empty FIPS context so the pqcrypto backend can
+// sign the component. The domain and caller context are still bound into
+// the signed bytes, so the ML-DSA signature remains non-portable outside
+// the hybrid scheme. _mlDsaCtx() is retained for legacy verification of
+// signatures produced by older clients.
+function _mlDsaMessage(message, ctx) {
+  return _ed25519Message(message, ctx);
+}
+
 function _mlDsaCtx(ctx) {
   const out = new Uint8Array(_DOMAIN.length + 1 + ctx.length);
   out.set(_DOMAIN);
@@ -109,6 +116,9 @@ function hybridDsaSign(message, sk, ctx) {
   if (sk.length !== HYBRID_DSA_SK_SIZE) {
     throw new Error(`Hybrid DSA sk must be ${HYBRID_DSA_SK_SIZE} bytes, got ${sk.length}`);
   }
+  if (ctx.length > 255) {
+    throw new Error(`Context string must be 0-255 bytes for hybrid DSA, got ${ctx.length}`);
+  }
 
   const edSk = sk.subarray(0, _ED25519_SK);
   const mlSk = sk.subarray(_ED25519_SK);
@@ -118,9 +128,10 @@ function hybridDsaSign(message, sk, ctx) {
   const edSig = ed25519Sign(edMsg, edSk);
   zeroize(edMsg);
 
-  // ML-DSA: signs raw message with domain-separated context (FIPS 204 pure mode)
-  const mlCtx = _mlDsaCtx(ctx);
-  const mlSig = mlSignWithContext(message, mlSk, mlCtx);
+  // ML-DSA: signs domain-prefixed message with empty FIPS context so
+  // pqcrypto can provide the production signing backend.
+  const mlMsg = _mlDsaMessage(message, ctx);
+  const mlSig = mlSignWithContext(mlMsg, mlSk, new Uint8Array(0));
 
   const sig = new Uint8Array(HYBRID_DSA_SIG_SIZE);
   sig.set(edSig);
@@ -144,6 +155,7 @@ function hybridDsaVerify(message, sig, pk, ctx) {
   else ctx = toBytes(ctx);
   if (sig.length !== HYBRID_DSA_SIG_SIZE) return false;
   if (pk.length !== HYBRID_DSA_PK_SIZE) return false;
+  if (ctx.length > 255) return false;
 
   const edSig = sig.subarray(0, _ED25519_SIG);
   const mlSig = sig.subarray(_ED25519_SIG);
@@ -154,9 +166,17 @@ function hybridDsaVerify(message, sig, pk, ctx) {
   const edMsg = _ed25519Message(message, ctx);
   const edOk = ed25519Verify(edMsg, edSig, edPk);
 
-  // ML-DSA: verify raw message with domain-separated context (FIPS 204 pure mode)
-  const mlCtx = _mlDsaCtx(ctx);
-  const mlOk = mlVerifyWithContext(message, mlSig, mlPk, mlCtx);
+  // ML-DSA: verify domain-prefixed message with empty FIPS context.
+  const mlMsg = _mlDsaMessage(message, ctx);
+  let mlOk = mlVerifyWithContext(mlMsg, mlSig, mlPk, new Uint8Array(0));
+  if (!mlOk) {
+    // Legacy fallback: signatures from older clients used a domain-separated
+    // FIPS context with the raw message body.
+    const legacyCtx = _mlDsaCtx(ctx);
+    if (legacyCtx.length <= 255) {
+      mlOk = mlVerifyWithContext(message, mlSig, mlPk, legacyCtx);
+    }
+  }
 
   return edOk && mlOk;
 }

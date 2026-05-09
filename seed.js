@@ -147,6 +147,7 @@ function zeroize(buf) {
 }
 
 function packLE_BB(a, b) { return new Uint8Array([a & 0xff, b & 0xff]); }
+function packLE_H(n) { return new Uint8Array([n & 0xff, (n >> 8) & 0xff]); }
 function packLE_I(n) { return new Uint8Array([n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >> 24) & 0xff]); }
 function packLE_Q(n) {
   const buf = new Uint8Array(8);
@@ -562,6 +563,34 @@ function toIndexes(seed) {
 
 // ── Key Derivation ──────────────────────────────────────────────
 
+function _passphraseToBytes(passphrase) {
+  // NFKC normalization prevents cross-platform fund loss from different
+  // Unicode representations of the same visual characters (macOS NFD vs
+  // Windows NFC).
+  if (!passphrase) return new Uint8Array(0);
+  return toBytes(passphrase.normalize("NFKC"));
+}
+
+function _buildSeedPayload(indexes, passphrase = "") {
+  // Build the length-prefixed, domain-separated UQS v1 seed payload.
+  // Layout: domain + word-count (uint16 LE) + per-position (pos, idx) pairs
+  // + b"\x01passphrase" tag + passphrase length (uint32 LE) + passphrase bytes.
+  // Each field is length- or domain-tagged so the boundary between the index
+  // region and the passphrase is unambiguous (prevents cross-length collisions).
+  const passphraseBytes = _passphraseToBytes(passphrase);
+  const parts = [
+    concatBytes(DOMAIN, toBytes("-seed-payload-v1")),
+    packLE_H(indexes.length),
+  ];
+  for (let pos = 0; pos < indexes.length; pos++) {
+    parts.push(packLE_BB(pos, indexes[pos]));
+  }
+  parts.push(toBytes("\x01passphrase"));
+  parts.push(packLE_I(passphraseBytes.length));
+  parts.push(passphraseBytes);
+  return concatBytes(...parts);
+}
+
 function getSeed(words, passphrase = "") {
   const indexes = toIndexes(words);
   if (indexes.length !== 24 && indexes.length !== 36) {
@@ -577,19 +606,14 @@ function getSeed(words, passphrase = "") {
     throw new Error("invalid seed checksum");
   }
 
-  // Step 1: Position-tagged payload
-  const payloadParts = [];
-  for (let pos = 0; pos < data.length; pos++) {
-    payloadParts.push(packLE_BB(pos, data[pos]));
-  }
-  if (passphrase) payloadParts.push(toBytes(passphrase.normalize("NFKC")));
-  const payload = concatBytes(...payloadParts);
+  // Step 1-2: Build a versioned, position-tagged, length-prefixed payload.
+  const payload = _buildSeedPayload(data, passphrase);
 
-  // Step 2: HKDF-Extract
+  // Step 3: HKDF-Extract
   const prk = hmacSha512(DOMAIN, payload);
   zeroize(payload);
 
-  // Step 3: Chained KDF — PBKDF2-SHA512 → Argon2id (defense in depth)
+  // Step 4: Chained KDF — PBKDF2-SHA512 → Argon2id (defense in depth)
   const salt = concatBytes(DOMAIN, toBytes("-stretch"));
   const stage1 = pbkdf2Sha512(prk, concatBytes(salt, toBytes("-pbkdf2")), PBKDF2_ITERATIONS, 64);
   zeroize(prk);
@@ -600,7 +624,7 @@ function getSeed(words, passphrase = "") {
   );
   zeroize(stage1);
 
-  // Step 4: HKDF-Expand
+  // Step 5: HKDF-Expand
   const master = hkdfExpand(stretched, concatBytes(DOMAIN, toBytes("-master")), 64);
   zeroize(stretched);
   return master;
@@ -621,12 +645,8 @@ async function getSeedAsync(words, passphrase = "") {
     throw new Error("invalid seed checksum");
   }
 
-  const payloadParts = [];
-  for (let pos = 0; pos < data.length; pos++) {
-    payloadParts.push(packLE_BB(pos, data[pos]));
-  }
-  if (passphrase) payloadParts.push(toBytes(passphrase.normalize("NFKC")));
-  const payload = concatBytes(...payloadParts);
+  // Build a versioned, position-tagged, length-prefixed payload.
+  const payload = _buildSeedPayload(data, passphrase);
 
   const prk = hmacSha512(DOMAIN, payload);
   zeroize(payload);
@@ -719,6 +739,35 @@ function generateQuantumKeypair(masterKey, algorithm = "ml-dsa-65", keyIndex = 0
 
 // ── Word Generation ─────────────────────────────────────────────
 
+const ENTROPY_HEALTH_SAMPLES = 5;
+const ENTROPY_HEALTH_MIN_PASSES = 3;
+
+function _entropyTestsPass(tests) {
+  return Object.values(tests).every(t => t.pass);
+}
+
+function _validateEntropyPipeline(extraEntropy = null) {
+  // Statistical tests naturally produce occasional outliers, so seed creation
+  // uses a fixed batch and majority decision instead of conditioning generation
+  // on the first sample that happens to pass. A broken source fails closed.
+  const samples = [];
+  let passCount = 0;
+  for (let i = 0; i < ENTROPY_HEALTH_SAMPLES; i++) {
+    const testSample = collectEntropy(1024, extraEntropy);
+    const tests = testEntropy(testSample);
+    const passed = _entropyTestsPass(tests);
+    if (passed) passCount++;
+    samples.push({ sample: i, pass: passed, tests });
+  }
+  return {
+    pass: passCount >= ENTROPY_HEALTH_MIN_PASSES,
+    passed: passCount,
+    required: ENTROPY_HEALTH_MIN_PASSES,
+    total: ENTROPY_HEALTH_SAMPLES,
+    samples,
+  };
+}
+
 function generateWords(wordCount = 36, extraEntropy = null, language = null) {
   if (wordCount !== 24 && wordCount !== 36) {
     throw new Error("wordCount must be 24 or 36");
@@ -735,27 +784,35 @@ function generateWords(wordCount = 36, extraEntropy = null, language = null) {
     }
   }
 
-  // Validate entropy (simplified: single test)
-  for (let attempt = 0; attempt < 10; attempt++) {
-    const testSample = collectEntropy(1024, extraEntropy);
-    const tests = testEntropy(testSample);
-    const allPass = Object.values(tests).every(t => t.pass);
-    if (allPass) {
-      const entropy = collectEntropy(dataCount, extraEntropy);
-      const indexes = [...entropy];
-      indexes.push(...computeChecksum(indexes));
-      return indexes.map((idx, pos) => ({ index: idx, word: wordMap[idx] || String(idx) }));
-    }
+  const health = _validateEntropyPipeline(extraEntropy);
+  if (!health.pass) {
+    throw new Error(
+      `Entropy failed validation (${health.passed}/${health.total} samples passed; ` +
+      `${health.required} required) -- RNG source may be compromised. ` +
+      "Do NOT generate seeds on this system."
+    );
   }
-  throw new Error("Entropy failed validation 10 times -- RNG may be compromised.");
+
+  const entropy = collectEntropy(dataCount, extraEntropy);
+  const indexes = [...entropy];
+  indexes.push(...computeChecksum(indexes));
+  return indexes.map((idx, pos) => ({ index: idx, word: wordMap[idx] || String(idx) }));
 }
 
 // ── Fingerprint ─────────────────────────────────────────────────
 
-function getFingerprint(seed, passphrase = "") {
+const FINGERPRINT_BITS = [32, 64, 128, 256];
+
+function getFingerprint(seed, passphrase = "", { bits = 32 } = {}) {
+  // Output strength selectable: 32 (default, 8 hex chars, BIP-32-style typo
+  // detection), 64, 128, or 256 (full SHA-256, 64 hex chars).
+  if (!FINGERPRINT_BITS.includes(bits)) {
+    throw new Error(`bits must be one of ${FINGERPRINT_BITS.join(", ")}, got ${bits}`);
+  }
   const key = getSeed(seed, passphrase);
   const hash = sha256(key);
-  return Array.from(hash.subarray(0, 4), b => b.toString(16).padStart(2, "0")).join("").toUpperCase();
+  const byteLen = bits / 8;
+  return Array.from(hash.subarray(0, byteLen), b => b.toString(16).padStart(2, "0")).join("").toUpperCase();
 }
 
 // ── Entropy Bits ────────────────────────────────────────────────
