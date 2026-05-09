@@ -127,7 +127,7 @@ section("ML-DSA-65");
   assert(sk.length === 4032, "sk should be 4032 bytes");
   assert(pk.length === 1952, "pk should be 1952 bytes");
 
-  // Round-trip with Uint8Array message (raw/interoperable API)
+  // Round-trip with Uint8Array message (FIPS 204 pure mode, default)
   const msg = new TextEncoder().encode("hello ml-dsa");
   const sig = crypto.mlSign(msg, sk);
   assert(sig.length === 3309, "sig should be 3309 bytes");

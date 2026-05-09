@@ -3540,6 +3540,27 @@ function mlVerifyInternal(message, sigBytes, pkBytes) {
  * @returns {Uint8Array} Signature bytes (3,309 bytes for ML-DSA-65).
  */
 function mlSign(message, sk, opts) {
+  // FIPS 204 §5.2 "pure" mode (default) — prepends 0x00 || ctx_len(=0) || msg
+  // before calling Sign_internal. This matches the FIPS standard and the
+  // Python `ml_sign(msg, sk)` default. For ACVP/KAT-style raw signing
+  // (Sign_internal directly), use `mlSignInternal`.
+  return mlSignWithContext(message, sk, new Uint8Array(0), opts);
+}
+
+/**
+ * ML-DSA-65 internal (raw) signing — signs the message bytes directly without
+ * the FIPS 204 "pure" mode prefix. This is FIPS 204 §6.4 Sign_internal.
+ *
+ * Use this only when interoperating with code that signs the raw message
+ * (ACVP/KAT test vectors). For production signing across implementations,
+ * prefer `mlSign` (FIPS pure mode), which is what Python `ml_sign` produces.
+ *
+ * @param {Uint8Array} message - Pre-processed message M' (or raw bytes for ACVP).
+ * @param {Uint8Array} sk - 4,032-byte secret key.
+ * @param {Object} [opts] - Options: {deterministic: bool, rnd: Uint8Array|null}.
+ * @returns {Uint8Array} Signature bytes (3,309 bytes).
+ */
+function mlSignInternalApi(message, sk, opts) {
   message = toBytes(message);
   if (opts === undefined) opts = {};
   return mlSignInternal(message, sk, opts.rnd || null, !!opts.deterministic);
@@ -3557,6 +3578,18 @@ function mlSign(message, sk, opts) {
  * @returns {boolean} True if the signature is valid, false otherwise.
  */
 function mlVerify(message, sig, pk) {
+  // FIPS 204 §5.3 "pure" mode (default) — prepends 0x00 || ctx_len(=0) || msg
+  // before calling Verify_internal. Matches Python `ml_verify(msg, sig, pk)`.
+  // For ACVP/KAT-style raw verification, use `mlVerifyInternal`.
+  return mlVerifyWithContext(message, sig, pk, new Uint8Array(0));
+}
+
+/**
+ * ML-DSA-65 internal (raw) verification — verifies a signature over raw message
+ * bytes without the FIPS 204 "pure" mode prefix. FIPS 204 §6.5 Verify_internal.
+ * Pair with `mlSignInternal`. For production cross-impl use, prefer `mlVerify`.
+ */
+function mlVerifyInternalApi(message, sig, pk) {
   message = toBytes(message);
   return mlVerifyInternal(message, sig, pk);
 }
@@ -3651,6 +3684,8 @@ module.exports = {
   mlVerify,
   mlSignWithContext,
   mlVerifyWithContext,
+  mlSignInternal: mlSignInternalApi,
+  mlVerifyInternal: mlVerifyInternalApi,
   mlSignAsync,
   mlVerifyAsync,
   // Expose sizes for callers
@@ -5235,6 +5270,20 @@ function _slh_verify_internal(message, sig_bytes, pk_bytes) {
  * @returns {Uint8Array} Signature bytes (7,856 bytes)
  */
 function slhSign(message, sk, opts) {
+  // FIPS 205 §10.2 "pure" mode (default) — prepends 0x00 || ctx_len(=0) || msg
+  // before calling slh_sign_internal. Matches Python `slh_sign(msg, sk)` and
+  // the FIPS standard. For ACVP/KAT-style raw signing, use `slhSignInternal`.
+  return slhSignWithContext(message, sk, new Uint8Array(0), opts);
+}
+
+/**
+ * SLH-DSA-SHAKE-128s internal (raw) signing — signs the message bytes directly
+ * without the FIPS 205 "pure" mode prefix. FIPS 205 §10.4 slh_sign_internal.
+ *
+ * Use only when interoperating with code that signs the raw message
+ * (ACVP/KAT test vectors). For production cross-impl signing, prefer `slhSign`.
+ */
+function slhSignInternalApi(message, sk, opts) {
   message = toBytes(message);
   if (opts === undefined || opts === null) opts = {};
   return _slh_sign_internal(
@@ -5254,6 +5303,17 @@ function slhSign(message, sk, opts) {
  * @returns {boolean} True if valid, false otherwise
  */
 function slhVerify(message, sig, pk) {
+  // FIPS 205 §10.3 "pure" mode (default) — prepends 0x00 || ctx_len(=0) || msg
+  // before calling slh_verify_internal. Matches Python `slh_verify`.
+  // For ACVP/KAT-style raw verification, use `slhVerifyInternal`.
+  return slhVerifyWithContext(message, sig, pk, new Uint8Array(0));
+}
+
+/**
+ * SLH-DSA-SHAKE-128s internal (raw) verification — pair with `slhSignInternal`.
+ * For production cross-impl use, prefer `slhVerify` (FIPS pure mode).
+ */
+function slhVerifyInternalApi(message, sig, pk) {
   message = toBytes(message);
   return _slh_verify_internal(message, sig, pk);
 }
@@ -5348,6 +5408,8 @@ module.exports = {
   slhVerify,
   slhSignWithContext,
   slhVerifyWithContext,
+  slhSignInternal: slhSignInternalApi,
+  slhVerifyInternal: slhVerifyInternalApi,
   slhSignAsync,
   slhVerifyAsync,
 
@@ -6156,8 +6218,8 @@ _modules["./crypto"] = function(module, exports, require) {
 
 const { sha3_256, sha3_512, shake128, shake256, shake128Xof, shake256Xof } = require("./sha3");
 const { sha256, sha512, hmacSha256, hmacSha512, hkdfExpand, hkdfExpandSha256, hkdfExtractSha256, pbkdf2Sha512, pbkdf2Sha512Async } = require("./sha2");
-const { mlKeygen, mlSign, mlVerify, mlSignWithContext, mlVerifyWithContext, mlSignAsync, mlVerifyAsync } = require("./ml_dsa");
-const { slhKeygen, slhSign, slhVerify, slhSignWithContext, slhVerifyWithContext, slhSignAsync, slhVerifyAsync } = require("./slh_dsa");
+const { mlKeygen, mlSign, mlVerify, mlSignWithContext, mlVerifyWithContext, mlSignInternal, mlVerifyInternal, mlSignAsync, mlVerifyAsync } = require("./ml_dsa");
+const { slhKeygen, slhSign, slhVerify, slhSignWithContext, slhVerifyWithContext, slhSignInternal, slhVerifyInternal, slhSignAsync, slhVerifyAsync } = require("./slh_dsa");
 const {
   ML_KEM_CT_SIZE,
   ML_KEM_DK_SIZE,
@@ -6182,10 +6244,16 @@ module.exports = {
   sha256, sha512, hmacSha256, hmacSha512, hkdfExpand, hkdfExpandSha256, hkdfExtractSha256, pbkdf2Sha512, pbkdf2Sha512Async,
 
   // ML-DSA-65 (FIPS 204) — Post-quantum digital signature
-  mlKeygen, mlSign, mlVerify, mlSignWithContext, mlVerifyWithContext, mlSignAsync, mlVerifyAsync,
+  // mlSign/mlVerify default to FIPS pure mode (matches Python ml_sign).
+  // mlSignInternal/mlVerifyInternal expose Sign_internal for ACVP/KAT use.
+  mlKeygen, mlSign, mlVerify, mlSignWithContext, mlVerifyWithContext,
+  mlSignInternal, mlVerifyInternal, mlSignAsync, mlVerifyAsync,
 
   // SLH-DSA-SHAKE-128s (FIPS 205) — Post-quantum hash-based signature
-  slhKeygen, slhSign, slhVerify, slhSignWithContext, slhVerifyWithContext, slhSignAsync, slhVerifyAsync,
+  // slhSign/slhVerify default to FIPS pure mode (matches Python slh_sign).
+  // slhSignInternal/slhVerifyInternal expose slh_sign_internal for ACVP/KAT use.
+  slhKeygen, slhSign, slhVerify, slhSignWithContext, slhVerifyWithContext,
+  slhSignInternal, slhVerifyInternal, slhSignAsync, slhVerifyAsync,
 
   // ML-KEM-768 (FIPS 203) — Post-quantum key encapsulation
   mlKemKeygen, mlKemEncaps, mlKemDecaps, mlKemEkFromDk,
@@ -7345,6 +7413,8 @@ module.exports = {
   mlVerify: crypto.mlVerify,
   mlSignWithContext: crypto.mlSignWithContext,
   mlVerifyWithContext: crypto.mlVerifyWithContext,
+  mlSignInternal: crypto.mlSignInternal,
+  mlVerifyInternal: crypto.mlVerifyInternal,
   mlSignAsync: crypto.mlSignAsync,
   mlVerifyAsync: crypto.mlVerifyAsync,
 
@@ -7354,6 +7424,8 @@ module.exports = {
   slhVerify: crypto.slhVerify,
   slhSignWithContext: crypto.slhSignWithContext,
   slhVerifyWithContext: crypto.slhVerifyWithContext,
+  slhSignInternal: crypto.slhSignInternal,
+  slhVerifyInternal: crypto.slhVerifyInternal,
   slhSignAsync: crypto.slhSignAsync,
   slhVerifyAsync: crypto.slhVerifyAsync,
 

@@ -1128,6 +1128,27 @@ function mlVerifyInternal(message, sigBytes, pkBytes) {
  * @returns {Uint8Array} Signature bytes (3,309 bytes for ML-DSA-65).
  */
 function mlSign(message, sk, opts) {
+  // FIPS 204 §5.2 "pure" mode (default) — prepends 0x00 || ctx_len(=0) || msg
+  // before calling Sign_internal. This matches the FIPS standard and the
+  // Python `ml_sign(msg, sk)` default. For ACVP/KAT-style raw signing
+  // (Sign_internal directly), use `mlSignInternal`.
+  return mlSignWithContext(message, sk, new Uint8Array(0), opts);
+}
+
+/**
+ * ML-DSA-65 internal (raw) signing — signs the message bytes directly without
+ * the FIPS 204 "pure" mode prefix. This is FIPS 204 §6.4 Sign_internal.
+ *
+ * Use this only when interoperating with code that signs the raw message
+ * (ACVP/KAT test vectors). For production signing across implementations,
+ * prefer `mlSign` (FIPS pure mode), which is what Python `ml_sign` produces.
+ *
+ * @param {Uint8Array} message - Pre-processed message M' (or raw bytes for ACVP).
+ * @param {Uint8Array} sk - 4,032-byte secret key.
+ * @param {Object} [opts] - Options: {deterministic: bool, rnd: Uint8Array|null}.
+ * @returns {Uint8Array} Signature bytes (3,309 bytes).
+ */
+function mlSignInternalApi(message, sk, opts) {
   message = toBytes(message);
   if (opts === undefined) opts = {};
   return mlSignInternal(message, sk, opts.rnd || null, !!opts.deterministic);
@@ -1145,6 +1166,18 @@ function mlSign(message, sk, opts) {
  * @returns {boolean} True if the signature is valid, false otherwise.
  */
 function mlVerify(message, sig, pk) {
+  // FIPS 204 §5.3 "pure" mode (default) — prepends 0x00 || ctx_len(=0) || msg
+  // before calling Verify_internal. Matches Python `ml_verify(msg, sig, pk)`.
+  // For ACVP/KAT-style raw verification, use `mlVerifyInternal`.
+  return mlVerifyWithContext(message, sig, pk, new Uint8Array(0));
+}
+
+/**
+ * ML-DSA-65 internal (raw) verification — verifies a signature over raw message
+ * bytes without the FIPS 204 "pure" mode prefix. FIPS 204 §6.5 Verify_internal.
+ * Pair with `mlSignInternal`. For production cross-impl use, prefer `mlVerify`.
+ */
+function mlVerifyInternalApi(message, sig, pk) {
   message = toBytes(message);
   return mlVerifyInternal(message, sig, pk);
 }
@@ -1239,6 +1272,8 @@ module.exports = {
   mlVerify,
   mlSignWithContext,
   mlVerifyWithContext,
+  mlSignInternal: mlSignInternalApi,
+  mlVerifyInternal: mlVerifyInternalApi,
   mlSignAsync,
   mlVerifyAsync,
   // Expose sizes for callers

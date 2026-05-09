@@ -37,6 +37,8 @@ module.exports = {
   mlVerify: crypto.mlVerify,
   mlSignWithContext: crypto.mlSignWithContext,
   mlVerifyWithContext: crypto.mlVerifyWithContext,
+  mlSignInternal: crypto.mlSignInternal,
+  mlVerifyInternal: crypto.mlVerifyInternal,
   mlSignAsync: crypto.mlSignAsync,
   mlVerifyAsync: crypto.mlVerifyAsync,
 
@@ -46,6 +48,8 @@ module.exports = {
   slhVerify: crypto.slhVerify,
   slhSignWithContext: crypto.slhSignWithContext,
   slhVerifyWithContext: crypto.slhVerifyWithContext,
+  slhSignInternal: crypto.slhSignInternal,
+  slhVerifyInternal: crypto.slhVerifyInternal,
   slhSignAsync: crypto.slhSignAsync,
   slhVerifyAsync: crypto.slhVerifyAsync,
 

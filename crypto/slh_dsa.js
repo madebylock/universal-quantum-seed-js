@@ -1016,6 +1016,20 @@ function _slh_verify_internal(message, sig_bytes, pk_bytes) {
  * @returns {Uint8Array} Signature bytes (7,856 bytes)
  */
 function slhSign(message, sk, opts) {
+  // FIPS 205 §10.2 "pure" mode (default) — prepends 0x00 || ctx_len(=0) || msg
+  // before calling slh_sign_internal. Matches Python `slh_sign(msg, sk)` and
+  // the FIPS standard. For ACVP/KAT-style raw signing, use `slhSignInternal`.
+  return slhSignWithContext(message, sk, new Uint8Array(0), opts);
+}
+
+/**
+ * SLH-DSA-SHAKE-128s internal (raw) signing — signs the message bytes directly
+ * without the FIPS 205 "pure" mode prefix. FIPS 205 §10.4 slh_sign_internal.
+ *
+ * Use only when interoperating with code that signs the raw message
+ * (ACVP/KAT test vectors). For production cross-impl signing, prefer `slhSign`.
+ */
+function slhSignInternalApi(message, sk, opts) {
   message = toBytes(message);
   if (opts === undefined || opts === null) opts = {};
   return _slh_sign_internal(
@@ -1035,6 +1049,17 @@ function slhSign(message, sk, opts) {
  * @returns {boolean} True if valid, false otherwise
  */
 function slhVerify(message, sig, pk) {
+  // FIPS 205 §10.3 "pure" mode (default) — prepends 0x00 || ctx_len(=0) || msg
+  // before calling slh_verify_internal. Matches Python `slh_verify`.
+  // For ACVP/KAT-style raw verification, use `slhVerifyInternal`.
+  return slhVerifyWithContext(message, sig, pk, new Uint8Array(0));
+}
+
+/**
+ * SLH-DSA-SHAKE-128s internal (raw) verification — pair with `slhSignInternal`.
+ * For production cross-impl use, prefer `slhVerify` (FIPS pure mode).
+ */
+function slhVerifyInternalApi(message, sig, pk) {
   message = toBytes(message);
   return _slh_verify_internal(message, sig, pk);
 }
@@ -1129,6 +1154,8 @@ module.exports = {
   slhVerify,
   slhSignWithContext,
   slhVerifyWithContext,
+  slhSignInternal: slhSignInternalApi,
+  slhVerifyInternal: slhVerifyInternalApi,
   slhSignAsync,
   slhVerifyAsync,
 
