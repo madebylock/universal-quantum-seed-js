@@ -652,9 +652,21 @@ async function getSeedAsync(words, passphrase = "") {
 }
 
 function getProfile(masterKey, profilePassword) {
-  // NFKC normalization prevents cross-platform derivation differences
-  // (e.g., macOS NFD vs Windows NFC for accented characters)
+  // ── DO NOT CHANGE — CANONICAL BEHAVIOR (locked by KAT v1) ──
+  // Empty profilePassword MUST return masterKey unchanged.
+  // This is the spec for the "default profile" across all UQS
+  // implementations (this JS, official Python universal-quantum-seed,
+  // signer's vendored Python). The KAT vectors at kat/seed_v1.json
+  // encode this: for every vector, default_profile_hex equals
+  // master_seed_hex. If you "fix" this to always derive, you will
+  // break cross-platform key compatibility AND every KAT will fail.
   const normalizedPw = (profilePassword == null ? "" : String(profilePassword)).normalize("NFKC");
+  if (normalizedPw === "") {
+    // Return a copy so callers can't mutate masterKey via this reference.
+    return new Uint8Array(masterKey);
+  }
+  // NFKC normalization (above) prevents cross-platform derivation differences
+  // (e.g., macOS NFD vs Windows NFC for accented characters).
   const payload = concatBytes(DOMAIN, toBytes("-profile"), toBytes(normalizedPw));
   const derived = hmacSha512(masterKey, payload);
   zeroize(payload);

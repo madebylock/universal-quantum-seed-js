@@ -180,11 +180,16 @@ function x25519NoCheck(sk, pk) {
   if (_nativeX25519DH) {
     // Native path may throw on low-order points — catch without timing leak
     // (Node.js native crypto is already constant-time; the exception is rare
-    // and only occurs on malicious input, not during normal operation)
+    // and only occurs on malicious input, not during normal operation).
+    // Fall back to pure-JS on native error: returning all-zeros would be
+    // wrong because RFC 7748 zeros are a valid low-order result, so
+    // substituting them on a library exception silently masks bugs and
+    // looks like a successful DH.
     try { return _nativeX25519DH(sk, pk); }
-    catch (_) { return new Uint8Array(32); }
+    catch (_) { return x25519Raw(sk, pk); }
   }
-  // Pure JS: compute raw, return result (may be all-zero for low-order points)
+  // Pure JS: compute raw, return result (may be all-zero for low-order points,
+  // which is the correct RFC 7748 output, distinct from a library failure).
   return x25519Raw(sk, pk);
 }
 

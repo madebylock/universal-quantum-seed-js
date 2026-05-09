@@ -2390,11 +2390,16 @@ function x25519NoCheck(sk, pk) {
   if (_nativeX25519DH) {
     // Native path may throw on low-order points — catch without timing leak
     // (Node.js native crypto is already constant-time; the exception is rare
-    // and only occurs on malicious input, not during normal operation)
+    // and only occurs on malicious input, not during normal operation).
+    // Fall back to pure-JS on native error: returning all-zeros would be
+    // wrong because RFC 7748 zeros are a valid low-order result, so
+    // substituting them on a library exception silently masks bugs and
+    // looks like a successful DH.
     try { return _nativeX25519DH(sk, pk); }
-    catch (_) { return new Uint8Array(32); }
+    catch (_) { return x25519Raw(sk, pk); }
   }
-  // Pure JS: compute raw, return result (may be all-zero for low-order points)
+  // Pure JS: compute raw, return result (may be all-zero for low-order points,
+  // which is the correct RFC 7748 output, distinct from a library failure).
   return x25519Raw(sk, pk);
 }
 
@@ -7051,9 +7056,21 @@ async function getSeedAsync(words, passphrase = "") {
 }
 
 function getProfile(masterKey, profilePassword) {
-  // NFKC normalization prevents cross-platform derivation differences
-  // (e.g., macOS NFD vs Windows NFC for accented characters)
+  // ── DO NOT CHANGE — CANONICAL BEHAVIOR (locked by KAT v1) ──
+  // Empty profilePassword MUST return masterKey unchanged.
+  // This is the spec for the "default profile" across all UQS
+  // implementations (this JS, official Python universal-quantum-seed,
+  // signer's vendored Python). The KAT vectors at kat/seed_v1.json
+  // encode this: for every vector, default_profile_hex equals
+  // master_seed_hex. If you "fix" this to always derive, you will
+  // break cross-platform key compatibility AND every KAT will fail.
   const normalizedPw = (profilePassword == null ? "" : String(profilePassword)).normalize("NFKC");
+  if (normalizedPw === "") {
+    // Return a copy so callers can't mutate masterKey via this reference.
+    return new Uint8Array(masterKey);
+  }
+  // NFKC normalization (above) prevents cross-platform derivation differences
+  // (e.g., macOS NFD vs Windows NFC for accented characters).
   const payload = concatBytes(DOMAIN, toBytes("-profile"), toBytes(normalizedPw));
   const derived = hmacSha512(masterKey, payload);
   zeroize(payload);

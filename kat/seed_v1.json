@@ -9,8 +9,8 @@
       "passphrase": "",
       "profile": "",
       "master_seed_hex": "996f7b7ad23e337df93b44fda465c10c8ad00c333f4f4e8708639d933e16437bbceef61d27e68663cab964c98d3eec2acc4292368e358f1e60b28268ca30117d",
-      "default_profile_hex": "0694eb440c0a2084b1448b089844e704b52516314ae8e59b43ae948f2d62bd126b02634267d52e5569c075a1d10837d39471140465f060c0f07b9b8ee0da5cac",
-      "named_profile_hex": "0694eb440c0a2084b1448b089844e704b52516314ae8e59b43ae948f2d62bd126b02634267d52e5569c075a1d10837d39471140465f060c0f07b9b8ee0da5cac",
+      "default_profile_hex": "996f7b7ad23e337df93b44fda465c10c8ad00c333f4f4e8708639d933e16437bbceef61d27e68663cab964c98d3eec2acc4292368e358f1e60b28268ca30117d",
+      "named_profile_hex": "996f7b7ad23e337df93b44fda465c10c8ad00c333f4f4e8708639d933e16437bbceef61d27e68663cab964c98d3eec2acc4292368e358f1e60b28268ca30117d",
       "fingerprint": "B3CCC927"
     },
     {
@@ -20,7 +20,7 @@
       "passphrase": "correct horse battery staple",
       "profile": "trading",
       "master_seed_hex": "8adb1ea97a3222e5b4eaad52a01036c4c4c03f7c088cb7e1ebd92a1fee19628cc5fee093803497412505d87886c3733bc9a5c1d6b0909cc32e954f6938852818",
-      "default_profile_hex": "fd699e47c2caff349a161f6a3b96c9d2e404b45391c78904fabc0428c0e26f2cbb7fa14d26956b61e72f8a4711e41bbeafc8e4c84376fec1a7613c3c7b374d27",
+      "default_profile_hex": "8adb1ea97a3222e5b4eaad52a01036c4c4c03f7c088cb7e1ebd92a1fee19628cc5fee093803497412505d87886c3733bc9a5c1d6b0909cc32e954f6938852818",
       "named_profile_hex": "e2d1756a92f7285fd3831dc54e18c5686f051917bd06a559816911d5a46d3d3c32d90f29bdde957e68d932f348bb3b43ad2d649f999d7a446347ffced184e382",
       "fingerprint": "6788828D"
     },
@@ -31,7 +31,7 @@
       "passphrase": "",
       "profile": "savings",
       "master_seed_hex": "a036f8eb9d66a4ae5c27555f3c278380b04d9c1d94afa16f979262fce0aeada72fdfa5baa414735645cb495fefa33042a0aa849d236a7093e8580da69ea3895c",
-      "default_profile_hex": "7c4a7f2473013420908413fa38bdb19fa3f910a1f6f0fe1700a897fcb0264bbd00e8bc0edd23a83ded1b5799a1fba6121cf44fd3755a592053e2669fcfa2502f",
+      "default_profile_hex": "a036f8eb9d66a4ae5c27555f3c278380b04d9c1d94afa16f979262fce0aeada72fdfa5baa414735645cb495fefa33042a0aa849d236a7093e8580da69ea3895c",
       "named_profile_hex": "0352c80df00e47b71244a3f3d5666ceedab28513f3503256e42cffc72f9c846f64a2269916aacfb7340fb1e43126a8b1271f14cf0b74f4733ba5210c9bc127c7",
       "fingerprint": "13BDBCF4"
     },
@@ -42,8 +42,8 @@
       "passphrase": "vault-2026!",
       "profile": "",
       "master_seed_hex": "834460bb8b2226753198787ce23f316433a6556aba03b5fb68da8c8b3416266294b7bfc61e2502357f16aa8761357825f75c6aeea5604e6868c76a6951b594a7",
-      "default_profile_hex": "67deaf9c0bf7ef2de1a4884ac6af8f54c07b3d1cec429ca8a2480673f5cebffbd7989648743f4f2c7b52edace2198bd9d03aa6f431e61c7c32d5bad4ca676a7d",
-      "named_profile_hex": "67deaf9c0bf7ef2de1a4884ac6af8f54c07b3d1cec429ca8a2480673f5cebffbd7989648743f4f2c7b52edace2198bd9d03aa6f431e61c7c32d5bad4ca676a7d",
+      "default_profile_hex": "834460bb8b2226753198787ce23f316433a6556aba03b5fb68da8c8b3416266294b7bfc61e2502357f16aa8761357825f75c6aeea5604e6868c76a6951b594a7",
+      "named_profile_hex": "834460bb8b2226753198787ce23f316433a6556aba03b5fb68da8c8b3416266294b7bfc61e2502357f16aa8761357825f75c6aeea5604e6868c76a6951b594a7",
       "fingerprint": "40D99EB6"
     },
     {
@@ -53,8 +53,8 @@
       "passphrase": "",
       "profile": "",
       "master_seed_hex": "4fe5a4751680e73162a25720f82796ea10e48a00bbb611c5ef271ebcf635b15ed1e941ce22fc14c822521142c43e4ff50cfd7e8dc0e29ac8fc5b9fd1fdb93c53",
-      "default_profile_hex": "d721d30441aebf3c7077eeb12f1a8e58c36ee8706d3ced4c518222d974f4365cc8911882ad7bac07d896541468f249979962aaf449aea8805d809de5839d5144",
-      "named_profile_hex": "d721d30441aebf3c7077eeb12f1a8e58c36ee8706d3ced4c518222d974f4365cc8911882ad7bac07d896541468f249979962aaf449aea8805d809de5839d5144",
+      "default_profile_hex": "4fe5a4751680e73162a25720f82796ea10e48a00bbb611c5ef271ebcf635b15ed1e941ce22fc14c822521142c43e4ff50cfd7e8dc0e29ac8fc5b9fd1fdb93c53",
+      "named_profile_hex": "4fe5a4751680e73162a25720f82796ea10e48a00bbb611c5ef271ebcf635b15ed1e941ce22fc14c822521142c43e4ff50cfd7e8dc0e29ac8fc5b9fd1fdb93c53",
       "fingerprint": "0666BAA5"
     },
     {
@@ -64,7 +64,7 @@
       "passphrase": "p?ssphrase",
       "profile": "hidden",
       "master_seed_hex": "1ecc836fa90f659cbc1020b0aac057be0c582d37c7387770bd6b58c314dc3da84e435efa452892299455b65095657965457024fd5d8eede66953ded3d75c8e8a",
-      "default_profile_hex": "4e5a7cbee964a9bb9ed26d7981f62603c41379d832c69bd73a042c3f049cc22c64d61974b9cde0ad6006374a3d84076a1f38c9bb2438f3a7b852f87282366d11",
+      "default_profile_hex": "1ecc836fa90f659cbc1020b0aac057be0c582d37c7387770bd6b58c314dc3da84e435efa452892299455b65095657965457024fd5d8eede66953ded3d75c8e8a",
       "named_profile_hex": "f584676728a1a300b73110307c19147499b75e173683b3acbd090ea48e6518b71de77cceb67c43c159ff27bec7d5e43a5593e975b0fefeed741202021fa1f3f7",
       "fingerprint": "75714370"
     },
@@ -75,7 +75,7 @@
       "passphrase": "",
       "profile": "default-check",
       "master_seed_hex": "7cedb3fb7e09559149dd67d6b3d51f39cfe26c0ff0aacd6c421573d4b2f853be78f6d40b528cadeb2d98b6180c8590af294ae1ef5f817e3e110bb8bc2b875d4c",
-      "default_profile_hex": "56df5f6b4feb19e86d06d5cd97b7c36e38ed6deb5e30d6521939b95b44457f1b0b1df7778dbc2ef17128a517dc89a49be1ba86dd977a0986b4f98105c0039ca2",
+      "default_profile_hex": "7cedb3fb7e09559149dd67d6b3d51f39cfe26c0ff0aacd6c421573d4b2f853be78f6d40b528cadeb2d98b6180c8590af294ae1ef5f817e3e110bb8bc2b875d4c",
       "named_profile_hex": "6e58a87584451538fc9a35569a2247333a51dae7a521b9f20cc03bf50ad4ae546707a6422aca61ac56ed7b529122c4e0e8ac12e2b366dc08fbc8090472416bcf",
       "fingerprint": "F9F9293E"
     },
@@ -86,7 +86,7 @@
       "passphrase": "NFKC: ?????????",
       "profile": "profile-2",
       "master_seed_hex": "b0ca5aaeb87a0b26eb8b54fc5781d224f06fd9e4f65c8e6a9a767611c5d9ac99543ef57edfc698930976ba176c59e0b60948836a2fad99bcac790b88aa7b66f8",
-      "default_profile_hex": "2b1dc84a9efa33a056a309562c68f8fa90e8aef22808d245e28224d3c5c545a0a68e3bbcfd9e6b014e40c88e14d569ee50c15736395d6656a47ecbfb95b880ac",
+      "default_profile_hex": "b0ca5aaeb87a0b26eb8b54fc5781d224f06fd9e4f65c8e6a9a767611c5d9ac99543ef57edfc698930976ba176c59e0b60948836a2fad99bcac790b88aa7b66f8",
       "named_profile_hex": "ca81a8d70c21274b17eb2eed4e84151ae1f73ded11da1744fd654d2f4ef111f6056f181bf6f8c82e131abf48011d8643f167cc7c4ea7346df55310ad833dd4e5",
       "fingerprint": "7D2F7CDF"
     }
