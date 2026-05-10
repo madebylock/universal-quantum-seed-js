@@ -78,6 +78,10 @@ module.exports = {
   hybridDsaKeygen: crypto.hybridDsaKeygen,
   hybridDsaSign: crypto.hybridDsaSign,
   hybridDsaVerify: crypto.hybridDsaVerify,
+  normalizeHybridDsaVersion: crypto.normalizeHybridDsaVersion,
+  getSupportedHybridDsaVersions: crypto.getSupportedHybridDsaVersions,
+  HYBRID_DSA_VERSION: crypto.HYBRID_DSA_VERSION,
+  SUPPORTED_HYBRID_DSA_VERSIONS: crypto.SUPPORTED_HYBRID_DSA_VERSIONS,
 
   // Hybrid X25519 + ML-KEM-768 — Classical + PQ KEM
   hybridKemKeygen: crypto.hybridKemKeygen,

@@ -17,7 +17,15 @@ const {
 } = require("./ml_kem");
 const { ed25519Keygen, ed25519Sign, ed25519Verify } = require("./ed25519");
 const { x25519Keygen, x25519 } = require("./x25519");
-const { hybridDsaKeygen, hybridDsaSign, hybridDsaVerify } = require("./hybrid_dsa");
+const {
+  HYBRID_DSA_VERSION,
+  SUPPORTED_HYBRID_DSA_VERSIONS,
+  getSupportedHybridDsaVersions,
+  hybridDsaKeygen,
+  hybridDsaSign,
+  hybridDsaVerify,
+  normalizeHybridDsaVersion,
+} = require("./hybrid_dsa");
 const { hybridKemKeygen, hybridKemEncaps, hybridKemDecaps } = require("./hybrid_kem");
 const { argon2id, blake2b } = require("./argon2");
 const { aesGcmEncrypt, aesGcmDecrypt, aesGcmEncryptAsync, aesGcmDecryptAsync } = require("./aes_gcm");
@@ -53,6 +61,8 @@ module.exports = {
 
   // Hybrid Ed25519 + ML-DSA-65 — Classical + post-quantum signature
   hybridDsaKeygen, hybridDsaSign, hybridDsaVerify,
+  normalizeHybridDsaVersion, getSupportedHybridDsaVersions,
+  HYBRID_DSA_VERSION, SUPPORTED_HYBRID_DSA_VERSIONS,
 
   // Hybrid X25519 + ML-KEM-768 — Classical + post-quantum KEM
   hybridKemKeygen, hybridKemEncaps, hybridKemDecaps,

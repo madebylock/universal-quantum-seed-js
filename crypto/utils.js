@@ -114,6 +114,7 @@ if (!_timingSafeEqual) {
       const _inst = new WebAssembly.Instance(_mod);
       const _mem = new Uint8Array(_inst.exports.m.buffer);
       _wasmCtEqual = function (a, b) {
+        if (a.length + b.length > _mem.length) return null;
         _mem.set(a, 0);
         _mem.set(b, a.length);
         const eq = _inst.exports.e(0, a.length, a.length) === 1;
@@ -130,7 +131,10 @@ if (!_timingSafeEqual) {
 function constantTimeEqual(a, b) {
   if (a.length !== b.length) return false;
   if (_timingSafeEqual) return _timingSafeEqual(a, b);
-  if (_wasmCtEqual) return _wasmCtEqual(a, b);
+  if (_wasmCtEqual) {
+    const wasmResult = _wasmCtEqual(a, b);
+    if (wasmResult !== null) return wasmResult;
+  }
   // Tier 3: Pure JS XOR-accumulate (constant-ish, JIT may optimize)
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];

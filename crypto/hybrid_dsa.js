@@ -43,18 +43,49 @@ const HYBRID_DSA_SIG_SIZE = _ED25519_SIG + _ML_DSA_SIG;  // 3,373
 
 // Domain prefix for stripping resistance.
 const _DOMAIN = new TextEncoder().encode("hybrid-dsa-v1");
+const HYBRID_DSA_VERSION = 1;
+const SUPPORTED_HYBRID_DSA_VERSIONS = Object.freeze([HYBRID_DSA_VERSION]);
+
+function normalizeHybridDsaVersion(version = HYBRID_DSA_VERSION) {
+  if (version === undefined || version === null || version === "") return HYBRID_DSA_VERSION;
+  let versionNumber;
+  if (typeof version === "string") {
+    let raw = version.trim().toLowerCase();
+    if (raw.startsWith("v")) raw = raw.slice(1);
+    if (!/^\d+$/.test(raw)) {
+      throw new Error(`Unsupported hybrid DSA version: ${version}`);
+    }
+    versionNumber = Number(raw);
+  } else {
+    versionNumber = Number(version);
+  }
+  if (!Number.isInteger(versionNumber) || !SUPPORTED_HYBRID_DSA_VERSIONS.includes(versionNumber)) {
+    throw new Error(`Unsupported hybrid DSA version: ${versionNumber}`);
+  }
+  return versionNumber;
+}
+
+function getSupportedHybridDsaVersions() {
+  return [...SUPPORTED_HYBRID_DSA_VERSIONS];
+}
+
+function _domainForVersion(version = HYBRID_DSA_VERSION) {
+  normalizeHybridDsaVersion(version);
+  return _DOMAIN;
+}
 
 // Ed25519 message: domain || len(ctx) || ctx || message
 // Prevents Ed25519 signature from being used standalone.
-function _ed25519Message(message, ctx) {
+function _ed25519Message(message, ctx, version = HYBRID_DSA_VERSION) {
   if (ctx.length > 255) {
     throw new Error(`Context string must be 0-255 bytes, got ${ctx.length}`);
   }
-  const out = new Uint8Array(_DOMAIN.length + 1 + ctx.length + message.length);
-  out.set(_DOMAIN);
-  out[_DOMAIN.length] = ctx.length;
-  out.set(ctx, _DOMAIN.length + 1);
-  out.set(message, _DOMAIN.length + 1 + ctx.length);
+  const domain = _domainForVersion(version);
+  const out = new Uint8Array(domain.length + 1 + ctx.length + message.length);
+  out.set(domain);
+  out[domain.length] = ctx.length;
+  out.set(ctx, domain.length + 1);
+  out.set(message, domain.length + 1 + ctx.length);
   return out;
 }
 
@@ -63,8 +94,8 @@ function _ed25519Message(message, ctx) {
 // component. The domain and caller context are still bound into the signed
 // bytes, so the ML-DSA signature remains non-portable outside the hybrid
 // scheme.
-function _mlDsaMessage(message, ctx) {
-  return _ed25519Message(message, ctx);
+function _mlDsaMessage(message, ctx, version = HYBRID_DSA_VERSION) {
+  return _ed25519Message(message, ctx, version);
 }
 
 /**
@@ -107,9 +138,10 @@ function hybridDsaKeygen(seed) {
  * @param {Uint8Array} message - Arbitrary-length message bytes
  * @param {Uint8Array} sk - 4,096-byte hybrid secret key
  * @param {Uint8Array} [ctx=new Uint8Array(0)] - Context string (0-255 bytes)
+ * @param {number|string} [version=1] - Hybrid DSA wire-format version
  * @returns {Uint8Array} 3,373-byte hybrid signature
  */
-function hybridDsaSign(message, sk, ctx) {
+function hybridDsaSign(message, sk, ctx, version = HYBRID_DSA_VERSION) {
   message = toBytes(message);
   if (ctx === undefined || ctx === null) ctx = new Uint8Array(0);
   else ctx = toBytes(ctx);
@@ -119,18 +151,19 @@ function hybridDsaSign(message, sk, ctx) {
   if (ctx.length > 255) {
     throw new Error(`Context string must be 0-255 bytes for hybrid DSA, got ${ctx.length}`);
   }
+  version = normalizeHybridDsaVersion(version);
 
   const edSk = sk.subarray(0, _ED25519_SK);
   const mlSk = sk.subarray(_ED25519_SK);
 
   // Ed25519: signs domain-prefixed message (stripping resistance)
-  const edMsg = _ed25519Message(message, ctx);
+  const edMsg = _ed25519Message(message, ctx, version);
   const edSig = ed25519Sign(edMsg, edSk);
   zeroize(edMsg);
 
   // ML-DSA: signs domain-prefixed message with empty FIPS context so
   // pqcrypto can provide the production signing backend.
-  const mlMsg = _mlDsaMessage(message, ctx);
+  const mlMsg = _mlDsaMessage(message, ctx, version);
   const mlSig = mlSignWithContext(mlMsg, mlSk, new Uint8Array(0));
 
   const sig = new Uint8Array(HYBRID_DSA_SIG_SIZE);
@@ -147,15 +180,21 @@ function hybridDsaSign(message, sk, ctx) {
  * @param {Uint8Array} sig - 3,373-byte hybrid signature
  * @param {Uint8Array} pk - 1,984-byte hybrid public key
  * @param {Uint8Array} [ctx=new Uint8Array(0)] - Context string
+ * @param {number|string} [version=1] - Hybrid DSA wire-format version
  * @returns {boolean}
  */
-function hybridDsaVerify(message, sig, pk, ctx) {
+function hybridDsaVerify(message, sig, pk, ctx, version = HYBRID_DSA_VERSION) {
   message = toBytes(message);
   if (ctx === undefined || ctx === null) ctx = new Uint8Array(0);
   else ctx = toBytes(ctx);
   if (sig.length !== HYBRID_DSA_SIG_SIZE) return false;
   if (pk.length !== HYBRID_DSA_PK_SIZE) return false;
   if (ctx.length > 255) return false;
+  try {
+    version = normalizeHybridDsaVersion(version);
+  } catch (_e) {
+    return false;
+  }
 
   const edSig = sig.subarray(0, _ED25519_SIG);
   const mlSig = sig.subarray(_ED25519_SIG);
@@ -163,11 +202,11 @@ function hybridDsaVerify(message, sig, pk, ctx) {
   const mlPk = pk.subarray(_ED25519_PK);
 
   // Ed25519: verify domain-prefixed message
-  const edMsg = _ed25519Message(message, ctx);
+  const edMsg = _ed25519Message(message, ctx, version);
   const edOk = ed25519Verify(edMsg, edSig, edPk);
 
   // ML-DSA: verify domain-prefixed message with empty FIPS context.
-  const mlMsg = _mlDsaMessage(message, ctx);
+  const mlMsg = _mlDsaMessage(message, ctx, version);
   const mlOk = mlVerifyWithContext(mlMsg, mlSig, mlPk, new Uint8Array(0));
 
   return edOk && mlOk;
@@ -177,6 +216,10 @@ module.exports = {
   hybridDsaKeygen,
   hybridDsaSign,
   hybridDsaVerify,
+  normalizeHybridDsaVersion,
+  getSupportedHybridDsaVersions,
+  HYBRID_DSA_VERSION,
+  SUPPORTED_HYBRID_DSA_VERSIONS,
   HYBRID_DSA_SK_SIZE,
   HYBRID_DSA_PK_SIZE,
   HYBRID_DSA_SIG_SIZE,

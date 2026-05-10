@@ -269,6 +269,20 @@ section("Hybrid Ed25519 + ML-DSA-65");
   const sig = crypto.hybridDsaSign(msg, sk);
   assert(sig.length === 3373, "sig should be 3373 bytes");
   assert(crypto.hybridDsaVerify(msg, sig, pk), "valid sig should verify");
+  assert(crypto.HYBRID_DSA_VERSION === 1, "Hybrid DSA version should be v1");
+  assert(uqs.HYBRID_DSA_VERSION === 1, "root export should expose Hybrid DSA v1");
+  assert(crypto.getSupportedHybridDsaVersions().join(",") === "1",
+    "only Hybrid DSA v1 should be supported");
+  assert(crypto.normalizeHybridDsaVersion("v1") === 1,
+    "Hybrid DSA v1 string should normalize");
+  const sigV1 = crypto.hybridDsaSign(msg, sk, undefined, "v1");
+  assert(crypto.hybridDsaVerify(msg, sigV1, pk, undefined, 1),
+    "explicit Hybrid DSA v1 should verify");
+  assert(!crypto.hybridDsaVerify(msg, sigV1, pk, undefined, 2),
+    "unsupported Hybrid DSA v2 verify should fail closed");
+  let hybridV2Rejected = false;
+  try { crypto.hybridDsaSign(msg, sk, undefined, 2); } catch (_) { hybridV2Rejected = true; }
+  assert(hybridV2Rejected, "unsupported Hybrid DSA v2 signing should be rejected");
 
   // String message
   assert(crypto.hybridDsaVerify("hello hybrid", crypto.hybridDsaSign("hello hybrid", sk), pk),
