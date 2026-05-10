@@ -5750,20 +5750,27 @@ function hybridKemEncaps(ek, randomnessIn) {
     throw new Error(`Hybrid KEM ek must be ${HYBRID_KEM_EK_SIZE} bytes, got ${ek ? ek.length : 0}`);
   }
 
-  const rnd = randomnessIn || randomBytes(64);
-  if (rnd.length !== 64) {
-    throw new Error(`Randomness must be 64 bytes, got ${rnd.length}`);
+  let x25519Randomness;
+  let mlKemRandomness;
+  if (!randomnessIn) {
+    x25519Randomness = randomBytes(32);
+    mlKemRandomness = undefined;
+  } else if (randomnessIn.length !== 64) {
+    throw new Error(`Randomness must be 64 bytes, got ${randomnessIn.length}`);
+  } else {
+    x25519Randomness = randomnessIn.subarray(0, 32);
+    mlKemRandomness = randomnessIn.subarray(32, 64);
   }
 
   const xPk = ek.subarray(0, _X25519_PK);
   const mlEk = ek.subarray(_X25519_PK);
 
   // X25519 ephemeral key exchange
-  const eph = x25519Keygen(rnd.subarray(0, 32));
+  const eph = x25519Keygen(x25519Randomness);
   const xSs = x25519(eph.sk, xPk);
 
   // ML-KEM encapsulation
-  const mlResult = mlKemEncaps(mlEk, rnd.subarray(32, 64));
+  const mlResult = mlKemEncaps(mlEk, mlKemRandomness);
 
   // Combine shared secrets with ciphertext binding
   const ct = new Uint8Array(HYBRID_KEM_CT_SIZE);
