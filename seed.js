@@ -523,6 +523,15 @@ function verifyChecksum(seed) {
   );
 }
 
+function validateSeed(seed) {
+  // Compatibility wrapper returning whether a UQS phrase is checksum-valid.
+  try {
+    return verifyChecksum(seed);
+  } catch (e) {
+    return false;
+  }
+}
+
 // ── Index Conversion ────────────────────────────────────────────
 
 function toIndexes(seed) {
@@ -799,6 +808,11 @@ function generateWords(wordCount = 36, extraEntropy = null, language = null) {
   return indexes.map((idx, pos) => ({ index: idx, word: wordMap[idx] || String(idx) }));
 }
 
+function generateSeed(wordCount = 36, extraEntropy = null, language = null) {
+  // Compatibility wrapper returning display words only.
+  return generateWords(wordCount, extraEntropy, language).map(({ word }) => word);
+}
+
 // ── Fingerprint ─────────────────────────────────────────────────
 
 const FINGERPRINT_BITS = [32, 64, 128, 256];
@@ -931,15 +945,31 @@ function getLanguages() {
   return results;
 }
 
+function canonicalWord(index, language = null) {
+  const idx = Number(index);
+  if (!Number.isInteger(idx) || idx < 0 || idx > 255) {
+    throw new Error(`word index out of range: ${index}`);
+  }
+  if (language && language !== "english") {
+    const lang = LANGUAGES[language];
+    if (!lang) throw new Error(`Unknown language: ${language}`);
+    return lang.words[idx];
+  }
+  return BASE[idx];
+}
+
 // ── Exports ─────────────────────────────────────────────────────
 
 module.exports = {
   VERSION,
   generateWords,
+  generateSeed,
   resolve,
   search,
   getLanguages,
+  canonicalWord,
   verifyChecksum,
+  validateSeed,
   getSeed,
   getSeedAsync,
   getProfile,

@@ -6522,6 +6522,15 @@ function verifyChecksum(seed) {
   );
 }
 
+function validateSeed(seed) {
+  // Compatibility wrapper returning whether a UQS phrase is checksum-valid.
+  try {
+    return verifyChecksum(seed);
+  } catch (e) {
+    return false;
+  }
+}
+
 
 // ── Index Conversion ────────────────────────────────────────────
 
