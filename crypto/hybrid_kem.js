@@ -108,18 +108,27 @@ function hybridKemKeygen(seed) {
     throw new Error(`Hybrid KEM seed must be a 96-byte Uint8Array, got ${seed ? seed.length : 0}`);
   }
 
-  const xResult = x25519Keygen(seed.subarray(0, 32));
-  const mlResult = mlKemKeygen(seed.subarray(32, 96));
+  // Copy halves into independent buffers so we can wipe them after keygen
+  // without touching the caller's seed argument.
+  const xSeed = seed.slice(0, 32);
+  const mlSeed = seed.slice(32, 96);
+  try {
+    const xResult = x25519Keygen(xSeed);
+    const mlResult = mlKemKeygen(mlSeed);
 
-  const ek = new Uint8Array(HYBRID_KEM_EK_SIZE);
-  ek.set(xResult.pk);
-  ek.set(mlResult.ek, _X25519_PK);
+    const ek = new Uint8Array(HYBRID_KEM_EK_SIZE);
+    ek.set(xResult.pk);
+    ek.set(mlResult.ek, _X25519_PK);
 
-  const dk = new Uint8Array(HYBRID_KEM_DK_SIZE);
-  dk.set(xResult.sk);
-  dk.set(mlResult.dk, _X25519_SK);
+    const dk = new Uint8Array(HYBRID_KEM_DK_SIZE);
+    dk.set(xResult.sk);
+    dk.set(mlResult.dk, _X25519_SK);
 
-  return { ek, dk };
+    return { ek, dk };
+  } finally {
+    zeroize(xSeed);
+    zeroize(mlSeed);
+  }
 }
 
 /**

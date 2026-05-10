@@ -19,6 +19,9 @@ module.exports = {
   search: seed.search,
   getLanguages: seed.getLanguages,
   verifyChecksum: seed.verifyChecksum,
+  validateSeed: seed.validateSeed,
+  normalizeSeedVersion: seed.normalizeSeedVersion,
+  getSupportedVersions: seed.getSupportedVersions,
 
   // ── Key Derivation ─────────────────────────────────────
   getSeed: seed.getSeed,
@@ -113,6 +116,8 @@ module.exports = {
 
   // ── Constants ──────────────────────────────────────────
   VERSION: seed.VERSION,
+  UQS_VERSION: seed.UQS_VERSION,
+  SUPPORTED_UQS_VERSIONS: seed.SUPPORTED_UQS_VERSIONS,
   DARK_VISUALS: seed.DARK_VISUALS,
   BASE_WORDS: seed.BASE_WORDS,
 };

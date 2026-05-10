@@ -78,18 +78,27 @@ function hybridDsaKeygen(seed) {
     throw new Error(`Hybrid DSA seed must be a 64-byte Uint8Array, got ${seed ? seed.length : 0}`);
   }
 
-  const edResult = ed25519Keygen(seed.subarray(0, 32));
-  const mlResult = mlKeygen(seed.subarray(32, 64));
+  // Copy halves into independent buffers so we can wipe them after keygen
+  // without touching the caller's seed argument.
+  const edSeed = seed.slice(0, 32);
+  const mlSeed = seed.slice(32, 64);
+  try {
+    const edResult = ed25519Keygen(edSeed);
+    const mlResult = mlKeygen(mlSeed);
 
-  const sk = new Uint8Array(HYBRID_DSA_SK_SIZE);
-  sk.set(edResult.sk);
-  sk.set(mlResult.sk, _ED25519_SK);
+    const sk = new Uint8Array(HYBRID_DSA_SK_SIZE);
+    sk.set(edResult.sk);
+    sk.set(mlResult.sk, _ED25519_SK);
 
-  const pk = new Uint8Array(HYBRID_DSA_PK_SIZE);
-  pk.set(edResult.pk);
-  pk.set(mlResult.pk, _ED25519_PK);
+    const pk = new Uint8Array(HYBRID_DSA_PK_SIZE);
+    pk.set(edResult.pk);
+    pk.set(mlResult.pk, _ED25519_PK);
 
-  return { sk, pk };
+    return { sk, pk };
+  } finally {
+    zeroize(edSeed);
+    zeroize(mlSeed);
+  }
 }
 
 /**

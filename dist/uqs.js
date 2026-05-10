@@ -5530,18 +5530,27 @@ function hybridDsaKeygen(seed) {
     throw new Error(`Hybrid DSA seed must be a 64-byte Uint8Array, got ${seed ? seed.length : 0}`);
   }
 
-  const edResult = ed25519Keygen(seed.subarray(0, 32));
-  const mlResult = mlKeygen(seed.subarray(32, 64));
+  // Copy halves into independent buffers so we can wipe them after keygen
+  // without touching the caller's seed argument.
+  const edSeed = seed.slice(0, 32);
+  const mlSeed = seed.slice(32, 64);
+  try {
+    const edResult = ed25519Keygen(edSeed);
+    const mlResult = mlKeygen(mlSeed);
 
-  const sk = new Uint8Array(HYBRID_DSA_SK_SIZE);
-  sk.set(edResult.sk);
-  sk.set(mlResult.sk, _ED25519_SK);
+    const sk = new Uint8Array(HYBRID_DSA_SK_SIZE);
+    sk.set(edResult.sk);
+    sk.set(mlResult.sk, _ED25519_SK);
 
-  const pk = new Uint8Array(HYBRID_DSA_PK_SIZE);
-  pk.set(edResult.pk);
-  pk.set(mlResult.pk, _ED25519_PK);
+    const pk = new Uint8Array(HYBRID_DSA_PK_SIZE);
+    pk.set(edResult.pk);
+    pk.set(mlResult.pk, _ED25519_PK);
 
-  return { sk, pk };
+    return { sk, pk };
+  } finally {
+    zeroize(edSeed);
+    zeroize(mlSeed);
+  }
 }
 
 /**
@@ -5740,18 +5749,27 @@ function hybridKemKeygen(seed) {
     throw new Error(`Hybrid KEM seed must be a 96-byte Uint8Array, got ${seed ? seed.length : 0}`);
   }
 
-  const xResult = x25519Keygen(seed.subarray(0, 32));
-  const mlResult = mlKemKeygen(seed.subarray(32, 96));
+  // Copy halves into independent buffers so we can wipe them after keygen
+  // without touching the caller's seed argument.
+  const xSeed = seed.slice(0, 32);
+  const mlSeed = seed.slice(32, 96);
+  try {
+    const xResult = x25519Keygen(xSeed);
+    const mlResult = mlKemKeygen(mlSeed);
 
-  const ek = new Uint8Array(HYBRID_KEM_EK_SIZE);
-  ek.set(xResult.pk);
-  ek.set(mlResult.ek, _X25519_PK);
+    const ek = new Uint8Array(HYBRID_KEM_EK_SIZE);
+    ek.set(xResult.pk);
+    ek.set(mlResult.ek, _X25519_PK);
 
-  const dk = new Uint8Array(HYBRID_KEM_DK_SIZE);
-  dk.set(xResult.sk);
-  dk.set(mlResult.dk, _X25519_SK);
+    const dk = new Uint8Array(HYBRID_KEM_DK_SIZE);
+    dk.set(xResult.sk);
+    dk.set(mlResult.dk, _X25519_SK);
 
-  return { ek, dk };
+    return { ek, dk };
+  } finally {
+    zeroize(xSeed);
+    zeroize(mlSeed);
+  }
 }
 
 /**
@@ -6525,6 +6543,8 @@ const { LOOKUP, LANGUAGES, DARK_VISUALS } = require("./words");
 const { argon2id, argon2idAsync } = require("./crypto/argon2");
 
 const VERSION = "1.0";
+const UQS_VERSION = 1;
+const SUPPORTED_UQS_VERSIONS = Object.freeze([UQS_VERSION]);
 
 // 256 base English words — one per icon position (0-255)
 const BASE_WORDS = [
@@ -6567,6 +6587,46 @@ BASE_WORDS.forEach((w, i) => { BASE[i] = w; });
 
 // Domain separator
 const DOMAIN = new TextEncoder().encode("universal-seed-v1");
+
+function normalizeSeedVersion(version = UQS_VERSION) {
+  if (version === undefined || version === null || version === "") return UQS_VERSION;
+  let versionNumber;
+  if (typeof version === "string") {
+    let value = version.trim().toLowerCase();
+    if (value.startsWith("uqs-")) value = value.slice(4);
+    if (value.startsWith("v")) value = value.slice(1);
+    if (!/^\d+$/.test(value)) {
+      throw new Error(`unsupported UQS seed version: ${version}`);
+    }
+    versionNumber = Number(value);
+  } else {
+    versionNumber = Number(version);
+  }
+  if (!Number.isInteger(versionNumber) || !SUPPORTED_UQS_VERSIONS.includes(versionNumber)) {
+    throw new Error(`unsupported UQS seed version: ${version}`);
+  }
+  return versionNumber;
+}
+
+function getSupportedVersions() {
+  return [...SUPPORTED_UQS_VERSIONS];
+}
+
+function _seedOptions(optionsOrVersion = UQS_VERSION) {
+  if (
+    optionsOrVersion &&
+    typeof optionsOrVersion === "object" &&
+    !Array.isArray(optionsOrVersion)
+  ) {
+    return { version: normalizeSeedVersion(optionsOrVersion.version) };
+  }
+  return { version: normalizeSeedVersion(optionsOrVersion) };
+}
+
+function _domainForVersion(version = UQS_VERSION) {
+  normalizeSeedVersion(version);
+  return DOMAIN;
+}
 
 // KDF parameters
 const PBKDF2_ITERATIONS = 600000;
@@ -7008,32 +7068,33 @@ function collectEntropy(nBytes, extraEntropy) {
 
 // ── Checksum ────────────────────────────────────────────────────
 
-function computeChecksum(indexes) {
+function computeChecksum(indexes, optionsOrVersion = UQS_VERSION) {
   // Intentional: this checksum detects transcription mistakes; it is not an
   // authenticity check. Two 8-bit words give 16 bits of error detection,
   // stronger than BIP39's 24-word checksum, while preserving the seed format.
   // Widening it would remove entropy words and break existing seed recovery
   // unless introduced as a separate versioned format.
-  const key = concatBytes(DOMAIN, toBytes("-checksum"));
+  const { version } = _seedOptions(optionsOrVersion);
+  const key = concatBytes(_domainForVersion(version), toBytes("-checksum"));
   const digest = hmacSha256(key, new Uint8Array(indexes));
   return [digest[0], digest[1]];
 }
 
-function verifyChecksum(seed) {
+function verifyChecksum(seed, optionsOrVersion = UQS_VERSION) {
   const indexes = toIndexes(seed);
   if (indexes.length !== 24 && indexes.length !== 36) return false;
   const data = indexes.slice(0, -2);
-  const expected = computeChecksum(data);
+  const expected = computeChecksum(data, optionsOrVersion);
   return constantTimeEqual(
     new Uint8Array([indexes[indexes.length - 2], indexes[indexes.length - 1]]),
     new Uint8Array(expected)
   );
 }
 
-function validateSeed(seed) {
+function validateSeed(seed, optionsOrVersion = UQS_VERSION) {
   // Compatibility wrapper returning whether a UQS phrase is checksum-valid.
   try {
-    return verifyChecksum(seed);
+    return verifyChecksum(seed, optionsOrVersion);
   } catch (e) {
     return false;
   }
@@ -7087,15 +7148,17 @@ function _passphraseToBytes(passphrase) {
   return toBytes(passphrase.normalize("NFKC"));
 }
 
-function _buildSeedPayload(indexes, passphrase = "") {
+function _buildSeedPayload(indexes, passphrase = "", optionsOrVersion = UQS_VERSION) {
   // Build the length-prefixed, domain-separated UQS v1 seed payload.
   // Layout: domain + word-count (uint16 LE) + per-position (pos, idx) pairs
   // + b"\x01passphrase" tag + passphrase length (uint32 LE) + passphrase bytes.
   // Each field is length- or domain-tagged so the boundary between the index
   // region and the passphrase is unambiguous (prevents cross-length collisions).
+  const { version } = _seedOptions(optionsOrVersion);
+  const domain = _domainForVersion(version);
   const passphraseBytes = _passphraseToBytes(passphrase);
   const parts = [
-    concatBytes(DOMAIN, toBytes("-seed-payload-v1")),
+    concatBytes(domain, toBytes("-seed-payload-v1")),
     packLE_H(indexes.length),
   ];
   for (let pos = 0; pos < indexes.length; pos++) {
@@ -7107,14 +7170,16 @@ function _buildSeedPayload(indexes, passphrase = "") {
   return concatBytes(...parts);
 }
 
-function getSeed(words, passphrase = "") {
+function getSeed(words, passphrase = "", optionsOrVersion = UQS_VERSION) {
+  const { version } = _seedOptions(optionsOrVersion);
+  const domain = _domainForVersion(version);
   const indexes = toIndexes(words);
   if (indexes.length !== 24 && indexes.length !== 36) {
     throw new Error(`seed must be 24 or 36 words, got ${indexes.length}`);
   }
 
   const data = indexes.slice(0, -2);
-  const expected = computeChecksum(data);
+  const expected = computeChecksum(data, version);
   if (!constantTimeEqual(
     new Uint8Array([indexes[indexes.length - 2], indexes[indexes.length - 1]]),
     new Uint8Array(expected)
@@ -7123,14 +7188,14 @@ function getSeed(words, passphrase = "") {
   }
 
   // Step 1-2: Build a versioned, position-tagged, length-prefixed payload.
-  const payload = _buildSeedPayload(data, passphrase);
+  const payload = _buildSeedPayload(data, passphrase, version);
 
   // Step 3: HKDF-Extract
-  const prk = hmacSha512(DOMAIN, payload);
+  const prk = hmacSha512(domain, payload);
   zeroize(payload);
 
   // Step 4: Chained KDF — PBKDF2-SHA512 → Argon2id (defense in depth)
-  const salt = concatBytes(DOMAIN, toBytes("-stretch"));
+  const salt = concatBytes(domain, toBytes("-stretch"));
   const stage1 = pbkdf2Sha512(prk, concatBytes(salt, toBytes("-pbkdf2")), PBKDF2_ITERATIONS, 64);
   zeroize(prk);
   const stretched = argon2id(
@@ -7141,19 +7206,21 @@ function getSeed(words, passphrase = "") {
   zeroize(stage1);
 
   // Step 5: HKDF-Expand
-  const master = hkdfExpand(stretched, concatBytes(DOMAIN, toBytes("-master")), 64);
+  const master = hkdfExpand(stretched, concatBytes(domain, toBytes("-master")), 64);
   zeroize(stretched);
   return master;
 }
 
-async function getSeedAsync(words, passphrase = "") {
+async function getSeedAsync(words, passphrase = "", optionsOrVersion = UQS_VERSION) {
+  const { version } = _seedOptions(optionsOrVersion);
+  const domain = _domainForVersion(version);
   const indexes = toIndexes(words);
   if (indexes.length !== 24 && indexes.length !== 36) {
     throw new Error(`seed must be 24 or 36 words, got ${indexes.length}`);
   }
 
   const data = indexes.slice(0, -2);
-  const expected = computeChecksum(data);
+  const expected = computeChecksum(data, version);
   if (!constantTimeEqual(
     new Uint8Array([indexes[indexes.length - 2], indexes[indexes.length - 1]]),
     new Uint8Array(expected)
@@ -7162,13 +7229,13 @@ async function getSeedAsync(words, passphrase = "") {
   }
 
   // Build a versioned, position-tagged, length-prefixed payload.
-  const payload = _buildSeedPayload(data, passphrase);
+  const payload = _buildSeedPayload(data, passphrase, version);
 
-  const prk = hmacSha512(DOMAIN, payload);
+  const prk = hmacSha512(domain, payload);
   zeroize(payload);
 
   // Chained KDF: PBKDF2-SHA512 → Argon2id (defense in depth)
-  const salt = concatBytes(DOMAIN, toBytes("-stretch"));
+  const salt = concatBytes(domain, toBytes("-stretch"));
 
   // Stage 1: PBKDF2-SHA512
   const stage1 = await pbkdf2Sha512Async(prk, concatBytes(salt, toBytes("-pbkdf2")), PBKDF2_ITERATIONS, 64);
@@ -7182,7 +7249,7 @@ async function getSeedAsync(words, passphrase = "") {
   );
   zeroize(stage1);
 
-  const master = hkdfExpand(stretched, concatBytes(DOMAIN, toBytes("-master")), 64);
+  const master = hkdfExpand(stretched, concatBytes(domain, toBytes("-master")), 64);
   zeroize(stretched);
   return master;
 }
@@ -7469,6 +7536,10 @@ function canonicalWord(index, language = null) {
 
 module.exports = {
   VERSION,
+  UQS_VERSION,
+  SUPPORTED_UQS_VERSIONS,
+  normalizeSeedVersion,
+  getSupportedVersions,
   generateWords,
   generateSeed,
   resolve,
@@ -7517,6 +7588,9 @@ module.exports = {
   search: seed.search,
   getLanguages: seed.getLanguages,
   verifyChecksum: seed.verifyChecksum,
+  validateSeed: seed.validateSeed,
+  normalizeSeedVersion: seed.normalizeSeedVersion,
+  getSupportedVersions: seed.getSupportedVersions,
 
   // ── Key Derivation ─────────────────────────────────────
   getSeed: seed.getSeed,
@@ -7611,6 +7685,8 @@ module.exports = {
 
   // ── Constants ──────────────────────────────────────────
   VERSION: seed.VERSION,
+  UQS_VERSION: seed.UQS_VERSION,
+  SUPPORTED_UQS_VERSIONS: seed.SUPPORTED_UQS_VERSIONS,
   DARK_VISUALS: seed.DARK_VISUALS,
   BASE_WORDS: seed.BASE_WORDS,
 };

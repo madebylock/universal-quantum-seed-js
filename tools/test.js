@@ -7,6 +7,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const uqs = require("../");
 const crypto = require("../crypto");
 const { toBytes, randomBytes, constantTimeEqual } = require("../crypto/utils");
 
@@ -27,6 +28,24 @@ function section(name) {
 }
 
 // ── Ed25519 ───────────────────────────────────────────────────────
+
+section("UQS version negotiation");
+
+(() => {
+  const words = uqs.generateWords();
+  const defaultSeed = uqs.getSeed(words);
+  const explicitV1Seed = uqs.getSeed(words, "", 1);
+
+  assert(uqs.UQS_VERSION === 1, "UQS_VERSION should be v1");
+  assert(uqs.getSupportedVersions().join(",") === "1", "only v1 should be supported");
+  assert(uqs.normalizeSeedVersion("v1") === 1, "v1 string should normalize");
+  assert(uqs.validateSeed(words), "generated v1 seed should validate");
+  assert(constantTimeEqual(defaultSeed, explicitV1Seed), "explicit v1 should match default seed");
+
+  let v2Rejected = false;
+  try { uqs.getSeed(words, "", 2); } catch (_) { v2Rejected = true; }
+  assert(v2Rejected, "unsupported UQS v2 should be rejected");
+})();
 
 section("Ed25519");
 
