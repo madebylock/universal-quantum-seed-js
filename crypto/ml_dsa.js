@@ -52,6 +52,20 @@ const N = 256;               // Polynomial degree
 const D = 13;                // Dropped bits from t
 const K = 6;                 // Rows in matrix A (module dimension)
 const L = 5;                 // Columns in matrix A
+const EXPAND_MASK_BITS_PER_COEFF = 20;
+const EXPAND_MASK_BYTES_PER_PAIR = 5;          // 2 coefficients per 5 bytes
+const EXPAND_MASK_SEED_BYTES = (5 * N / 2) | 0;
+const EXPAND_MASK_LAST_PAIR_OFFSET = ((N / 2) - 1) * EXPAND_MASK_BYTES_PER_PAIR;
+// Largest read inside expandMask is buf[off + 4] when off = LAST_PAIR_OFFSET.
+// Fail loud at module load if a future change to N or the bit layout would
+// push that read past the SHAKE-derived buffer.
+if (EXPAND_MASK_LAST_PAIR_OFFSET + 4 >= EXPAND_MASK_SEED_BYTES) {
+  throw new Error(
+    "ML-DSA expandMask invariant violated: largest read past SHAKE buffer " +
+    `(LAST_PAIR_OFFSET=${EXPAND_MASK_LAST_PAIR_OFFSET}+4 >= ` +
+    `SEED_BYTES=${EXPAND_MASK_SEED_BYTES})`
+  );
+}
 const ETA = 4;               // Secret key coefficient bound
 const TAU = 49;              // Challenge polynomial weight (number of +/-1)
 const BETA = TAU * ETA;      // = 196 -- FIPS 204 Table 1: beta for ML-DSA-65
@@ -402,11 +416,11 @@ function expandMask(rhoPrime, kappa) {
   // FIPS 204 specifies: 5 bytes -> 2 coefficients (Algorithm 34).
   for (let j = 0; j < L; j++) {
     const input = concatBytes(rhoPrime, packU16LE(kappa + j));
-    const buf = shake256(input, (5 * N / 2) | 0); // 640 bytes
+    const buf = shake256(input, EXPAND_MASK_SEED_BYTES);
 
     const coeffs = new Array(N);
     for (let i = 0; i < N; i += 2) {
-      const off = (i >> 1) * 5;
+      const off = (i >> 1) * EXPAND_MASK_BYTES_PER_PAIR;
 
       // Load 32 bits little-endian from 4 bytes
       const t =
