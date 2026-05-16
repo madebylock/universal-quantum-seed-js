@@ -27,6 +27,13 @@
 // Reuse a single TextEncoder instance to reduce allocations.
 const _enc = new TextEncoder();
 
+function _loadNodeCrypto() {
+  try {
+    if (typeof require === "function") return require("crypto");
+  } catch (_) {}
+  return null;
+}
+
 function toBytes(data) {
   if (data instanceof Uint8Array) return data;
   if (typeof data === "string") return _enc.encode(data);
@@ -54,7 +61,11 @@ function randomBytes(n) {
     globalThis.crypto.getRandomValues(buf);
     return buf;
   }
-  return new Uint8Array(require("crypto").randomBytes(n));
+  const nodeCrypto = _loadNodeCrypto();
+  if (nodeCrypto && typeof nodeCrypto.randomBytes === "function") {
+    return new Uint8Array(nodeCrypto.randomBytes(n));
+  }
+  throw new Error("no secure RNG available (WebCrypto missing and Node.js crypto unavailable)");
 }
 
 /** Best-effort zeroing of sensitive buffers. Not guaranteed by JS GC, but reduces exposure. */
@@ -77,7 +88,7 @@ function zeroize(buf) {
 // Tier 1: Node.js native
 let _timingSafeEqual = null;
 try {
-  const nodeCrypto = require("crypto");
+  const nodeCrypto = _loadNodeCrypto();
   if (typeof nodeCrypto.timingSafeEqual === "function") {
     _timingSafeEqual = nodeCrypto.timingSafeEqual;
   }

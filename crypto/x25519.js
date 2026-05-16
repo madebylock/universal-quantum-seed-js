@@ -103,24 +103,44 @@ try {
     "302a300506032b656e032100", "hex"
   );
   const nodeCrypto = require("crypto");
+
+  function _x25519PrivateDer(sk) {
+    const der = Buffer.allocUnsafeSlow(_X25519_SK_DER_PREFIX.length + sk.length);
+    _X25519_SK_DER_PREFIX.copy(der, 0);
+    for (let i = 0; i < sk.length; i++) der[_X25519_SK_DER_PREFIX.length + i] = sk[i];
+    return der;
+  }
+
   // Probe: create a test X25519 key
-  const _probe = Buffer.concat([_X25519_SK_DER_PREFIX, Buffer.alloc(32)]);
-  nodeCrypto.createPrivateKey({ key: _probe, format: "der", type: "pkcs8" });
+  const _probe = _x25519PrivateDer(new Uint8Array(32));
+  try {
+    nodeCrypto.createPrivateKey({ key: _probe, format: "der", type: "pkcs8" });
+  } finally {
+    _probe.fill(0);
+  }
 
   _nativeX25519Keygen = (sk) => {
-    const der = Buffer.concat([_X25519_SK_DER_PREFIX, Buffer.from(sk)]);
-    const privateKey = nodeCrypto.createPrivateKey({ key: der, format: "der", type: "pkcs8" });
-    const publicKey = nodeCrypto.createPublicKey(privateKey);
-    const pkDer = publicKey.export({ type: "spki", format: "der" });
-    return new Uint8Array(pkDer.subarray(pkDer.length - 32));
+    const der = _x25519PrivateDer(sk);
+    try {
+      const privateKey = nodeCrypto.createPrivateKey({ key: der, format: "der", type: "pkcs8" });
+      const publicKey = nodeCrypto.createPublicKey(privateKey);
+      const pkDer = publicKey.export({ type: "spki", format: "der" });
+      return new Uint8Array(pkDer.subarray(pkDer.length - 32));
+    } finally {
+      der.fill(0);
+    }
   };
 
   _nativeX25519DH = (sk, pk) => {
-    const skDer = Buffer.concat([_X25519_SK_DER_PREFIX, Buffer.from(sk)]);
+    const skDer = _x25519PrivateDer(sk);
     const pkDer = Buffer.concat([_X25519_PK_DER_PREFIX, Buffer.from(pk)]);
-    const privateKey = nodeCrypto.createPrivateKey({ key: skDer, format: "der", type: "pkcs8" });
-    const publicKey = nodeCrypto.createPublicKey({ key: pkDer, format: "der", type: "spki" });
-    return new Uint8Array(nodeCrypto.diffieHellman({ privateKey, publicKey }));
+    try {
+      const privateKey = nodeCrypto.createPrivateKey({ key: skDer, format: "der", type: "pkcs8" });
+      const publicKey = nodeCrypto.createPublicKey({ key: pkDer, format: "der", type: "spki" });
+      return new Uint8Array(nodeCrypto.diffieHellman({ privateKey, publicKey }));
+    } finally {
+      skDer.fill(0);
+    }
   };
 } catch (_) {
   // Native X25519 not available — pure JS fallback

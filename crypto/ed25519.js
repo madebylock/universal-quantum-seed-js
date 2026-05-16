@@ -13,8 +13,10 @@
 //     Signature:   64 bytes (R || S)
 //
 // When Node.js crypto is available, uses native Ed25519 (constant-time OpenSSL).
-// Falls back to pure JavaScript using fixed-width 16-limb field arithmetic.
-// All control flow and arithmetic is constant-time (no BigInt in hot path).
+// Secret-key operations fail closed without native Ed25519 because the pure-JS
+// scalar path necessarily creates immutable BigInt secret intermediates that
+// cannot be zeroized from the JavaScript heap. Public verification remains
+// available as a pure-JS fallback.
 
 const { sha512 } = require("./sha2");
 const { toBytes, zeroize, constantTimeEqual } = require("./utils");
@@ -255,6 +257,16 @@ try {
   const _ED25519_PK_DER_PREFIX = Buffer.from(
     "302a300506032b6570032100", "hex"
   );
+  const _secretPrivateDer = (prefix, seed) => {
+    const der = Buffer.allocUnsafeSlow(prefix.length + seed.length);
+    der.set(prefix, 0);
+    der.set(seed, prefix.length);
+    return der;
+  };
+  const _ed25519PrivateDer = (seed) => {
+    const der = _secretPrivateDer(_ED25519_SK_DER_PREFIX, seed);
+    return der;
+  };
   const nodeCrypto = require("crypto");
   const _probe = nodeCrypto.createPrivateKey({
     key: Buffer.concat([_ED25519_SK_DER_PREFIX, Buffer.alloc(32)]),
@@ -263,21 +275,29 @@ try {
   nodeCrypto.sign(null, Buffer.alloc(1), _probe);
 
   _nativeKeygen = (seed) => {
-    const der = Buffer.concat([_ED25519_SK_DER_PREFIX, Buffer.from(seed)]);
-    const privateKey = nodeCrypto.createPrivateKey({ key: der, format: "der", type: "pkcs8" });
-    const publicKey = nodeCrypto.createPublicKey(privateKey);
-    const pkDer = publicKey.export({ type: "spki", format: "der" });
-    const pk = new Uint8Array(pkDer.subarray(pkDer.length - 32));
-    const sk = new Uint8Array(64);
-    sk.set(seed);
-    sk.set(pk, 32);
-    return { sk, pk };
+    const der = _ed25519PrivateDer(seed);
+    try {
+      const privateKey = nodeCrypto.createPrivateKey({ key: der, format: "der", type: "pkcs8" });
+      const publicKey = nodeCrypto.createPublicKey(privateKey);
+      const pkDer = publicKey.export({ type: "spki", format: "der" });
+      const pk = new Uint8Array(pkDer.subarray(pkDer.length - 32));
+      const sk = new Uint8Array(64);
+      sk.set(seed);
+      sk.set(pk, 32);
+      return { sk, pk };
+    } finally {
+      der.fill(0);
+    }
   };
 
   _nativeSign = (message, seed) => {
-    const der = Buffer.concat([_ED25519_SK_DER_PREFIX, Buffer.from(seed)]);
-    const privateKey = nodeCrypto.createPrivateKey({ key: der, format: "der", type: "pkcs8" });
-    return new Uint8Array(nodeCrypto.sign(null, Buffer.from(message), privateKey));
+    const der = _ed25519PrivateDer(seed);
+    try {
+      const privateKey = nodeCrypto.createPrivateKey({ key: der, format: "der", type: "pkcs8" });
+      return new Uint8Array(nodeCrypto.sign(null, Buffer.from(message), privateKey));
+    } finally {
+      der.fill(0);
+    }
   };
 
   _nativeVerify = (message, sig, pk) => {
@@ -296,13 +316,9 @@ function _publicKeyFromSeed(seed) {
     throw new Error("Ed25519 seed must be a 32-byte Uint8Array");
   }
   if (_nativeKeygen) return _nativeKeygen(seed).pk;
-
-  const h = sha512(seed);
-  const a = bytesToBigIntLE(clamp(h));
-  const pkPoint = scalarMultBase(a);
-  const pkBytes = encodePoint(pkPoint);
-  zeroize(h);
-  return pkBytes;
+  throw new Error(
+    "Ed25519 keygen requires native Ed25519; pure-JS secret scalar fallback is disabled because BigInt secrets cannot be zeroized"
+  );
 }
 
 function ed25519Keygen(seed) {
@@ -330,46 +346,9 @@ function ed25519Sign(message, skBytes) {
   }
 
   if (_nativeSign) return _nativeSign(message, skBytes.subarray(0, 32));
-
-  const h = sha512(seed);
-  const a = bytesToBigIntLE(clamp(h));
-  const prefix = new Uint8Array(h.subarray(32, 64));
-
-  // r = SHA-512(prefix || message) mod L
-  const rInput = new Uint8Array(prefix.length + message.length);
-  rInput.set(prefix);
-  rInput.set(message, prefix.length);
-  const r = bytesToBigIntLE(sha512(rInput)) % L;
-
-  // R = r * G
-  const R = scalarMultBase(r);
-  const rBytes = encodePoint(R);
-
-  // S = (r + SHA-512(R || pk || message) * a) mod L
-  const hramInput = new Uint8Array(32 + 32 + message.length);
-  hramInput.set(rBytes);
-  hramInput.set(pkBytes, 32);
-  hramInput.set(message, 64);
-  const hram = bytesToBigIntLE(sha512(hramInput)) % L;
-  const S = (r + hram * a) % L;
-
-  // Encode S as 32 bytes LE
-  const sBytes = new Uint8Array(32);
-  let ss = S;
-  for (let i = 0; i < 32; i++) {
-    sBytes[i] = Number(ss & 0xffn);
-    ss >>= 8n;
-  }
-
-  // Best-effort cleanup of secret intermediates
-  zeroize(h);
-  zeroize(prefix);
-  zeroize(rInput);
-
-  const sig = new Uint8Array(64);
-  sig.set(rBytes);
-  sig.set(sBytes, 32);
-  return sig;
+  throw new Error(
+    "Ed25519 signing requires native Ed25519; pure-JS secret scalar fallback is disabled because BigInt secrets cannot be zeroized"
+  );
 }
 
 function ed25519Verify(message, sigBytes, pkBytes) {

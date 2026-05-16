@@ -4,6 +4,7 @@
 //
 // Crypto-only build: all cryptographic primitives + key derivation.
 // No wordlists, no word resolution, no language data (~75% smaller).
+// mirrors modules/uqs/crypto.py for wallet parity tests.
 //
 // Usage:
 //   <script src="uqs-crypto.js"><\/script>
@@ -81,6 +82,13 @@ _modules["./crypto/utils"] = function(module, exports, require) {
 // Reuse a single TextEncoder instance to reduce allocations.
 const _enc = new TextEncoder();
 
+function _loadNodeCrypto() {
+  try {
+    if (typeof require === "function") return require("crypto");
+  } catch (_) {}
+  return null;
+}
+
 function toBytes(data) {
   if (data instanceof Uint8Array) return data;
   if (typeof data === "string") return _enc.encode(data);
@@ -108,7 +116,11 @@ function randomBytes(n) {
     globalThis.crypto.getRandomValues(buf);
     return buf;
   }
-  return new Uint8Array(require("crypto").randomBytes(n));
+  const nodeCrypto = _loadNodeCrypto();
+  if (nodeCrypto && typeof nodeCrypto.randomBytes === "function") {
+    return new Uint8Array(nodeCrypto.randomBytes(n));
+  }
+  throw new Error("no secure RNG available (WebCrypto missing and Node.js crypto unavailable)");
 }
 
 /** Best-effort zeroing of sensitive buffers. Not guaranteed by JS GC, but reduces exposure. */
@@ -131,7 +143,7 @@ function zeroize(buf) {
 // Tier 1: Node.js native
 let _timingSafeEqual = null;
 try {
-  const nodeCrypto = require("crypto");
+  const nodeCrypto = _loadNodeCrypto();
   if (typeof nodeCrypto.timingSafeEqual === "function") {
     _timingSafeEqual = nodeCrypto.timingSafeEqual;
   }
@@ -245,6 +257,9 @@ function feCopy(a) {
 
 // Load from 32-byte little-endian encoding
 function feFromBytes(b) {
+  if (!(b instanceof Uint8Array) || b.length !== 32) {
+    throw new Error("feFromBytes: expected 32 bytes");
+  }
   const o = new Float64Array(_NLIMBS);
   for (let i = 0; i < _NLIMBS; i++) {
     o[i] = b[2 * i] | (b[2 * i + 1] << 8);
@@ -267,6 +282,9 @@ function _feCarry(o) {
 
 // Encode to 32-byte little-endian, fully reduced mod p
 function feToBytes(a) {
+  if (!a || a.length !== _NLIMBS) {
+    throw new Error("feToBytes: expected " + _NLIMBS + " limbs");
+  }
   const t = feCopy(a);
   _feReduce(t);
   const o = new Uint8Array(32);
@@ -1722,10 +1740,7 @@ function argon2id(password, salt, timeCost, memoryCost, parallelism, hashLen) {
 
 // ── Async Argon2id (Web Worker) ─────────────────────────────────
 
-let _workerURL = null;
-
-function _getWorkerURL() {
-  if (_workerURL) return _workerURL;
+function _createWorkerURL() {
   // Build a self-contained worker script from the functions above
   const src = `"use strict";
 ${le32.toString()}
@@ -1756,34 +1771,40 @@ self.onmessage=function(e){
   self.postMessage(r.buffer,[r.buffer]);
 };`;
   const blob = new Blob([src], { type: "application/javascript" });
-  _workerURL = URL.createObjectURL(blob);
-  return _workerURL;
+  return URL.createObjectURL(blob);
 }
 
 function argon2idAsync(password, salt, timeCost, memoryCost, parallelism, hashLen) {
   if (typeof Worker !== "undefined" && typeof Blob !== "undefined" && typeof URL !== "undefined" && URL.createObjectURL) {
-    return new Promise(function(resolve) {
+    return new Promise(function(resolve, reject) {
+      var url = null;
+      var w = null;
+      function cleanup() {
+        if (w) w.terminate();
+        if (url) URL.revokeObjectURL(url);
+      }
       try {
-        var url = _getWorkerURL();
-        var w = new Worker(url);
+        url = _createWorkerURL();
+        w = new Worker(url);
         w.onmessage = function(e) {
-          w.terminate();
+          cleanup();
           resolve(new Uint8Array(e.data));
         };
-        w.onerror = function() {
-          w.terminate();
-          resolve(argon2id(password, salt, timeCost, memoryCost, parallelism, hashLen));
+        w.onerror = function(err) {
+          cleanup();
+          reject(err || new Error("argon2idAsync worker failed; refusing synchronous main-thread fallback"));
         };
         // Transfer copies of the typed array data
         var pw = password.slice().buffer;
         var sl = salt.slice().buffer;
         w.postMessage({ password: pw, salt: sl, t: timeCost, m: memoryCost, p: parallelism, hashLen: hashLen }, [pw, sl]);
-      } catch(_) {
-        resolve(argon2id(password, salt, timeCost, memoryCost, parallelism, hashLen));
+      } catch(err) {
+        cleanup();
+        reject(err || new Error("argon2idAsync setup failed; refusing synchronous main-thread fallback"));
       }
     });
   }
-  return Promise.resolve(argon2id(password, salt, timeCost, memoryCost, parallelism, hashLen));
+  return Promise.reject(new Error("argon2idAsync requires Web Worker; refusing synchronous main-thread fallback"));
 }
 
 module.exports = { argon2id, argon2idAsync, blake2b };
@@ -1808,8 +1829,10 @@ _modules["./crypto/ed25519"] = function(module, exports, require) {
 //     Signature:   64 bytes (R || S)
 //
 // When Node.js crypto is available, uses native Ed25519 (constant-time OpenSSL).
-// Falls back to pure JavaScript using fixed-width 16-limb field arithmetic.
-// All control flow and arithmetic is constant-time (no BigInt in hot path).
+// Secret-key operations fail closed without native Ed25519 because the pure-JS
+// scalar path necessarily creates immutable BigInt secret intermediates that
+// cannot be zeroized from the JavaScript heap. Public verification remains
+// available as a pure-JS fallback.
 
 const { sha512 } = require("./sha2");
 const { toBytes, zeroize, constantTimeEqual } = require("./utils");
@@ -2050,6 +2073,16 @@ try {
   const _ED25519_PK_DER_PREFIX = Buffer.from(
     "302a300506032b6570032100", "hex"
   );
+  const _secretPrivateDer = (prefix, seed) => {
+    const der = Buffer.allocUnsafeSlow(prefix.length + seed.length);
+    der.set(prefix, 0);
+    der.set(seed, prefix.length);
+    return der;
+  };
+  const _ed25519PrivateDer = (seed) => {
+    const der = _secretPrivateDer(_ED25519_SK_DER_PREFIX, seed);
+    return der;
+  };
   const nodeCrypto = require("crypto");
   const _probe = nodeCrypto.createPrivateKey({
     key: Buffer.concat([_ED25519_SK_DER_PREFIX, Buffer.alloc(32)]),
@@ -2058,21 +2091,29 @@ try {
   nodeCrypto.sign(null, Buffer.alloc(1), _probe);
 
   _nativeKeygen = (seed) => {
-    const der = Buffer.concat([_ED25519_SK_DER_PREFIX, Buffer.from(seed)]);
-    const privateKey = nodeCrypto.createPrivateKey({ key: der, format: "der", type: "pkcs8" });
-    const publicKey = nodeCrypto.createPublicKey(privateKey);
-    const pkDer = publicKey.export({ type: "spki", format: "der" });
-    const pk = new Uint8Array(pkDer.subarray(pkDer.length - 32));
-    const sk = new Uint8Array(64);
-    sk.set(seed);
-    sk.set(pk, 32);
-    return { sk, pk };
+    const der = _ed25519PrivateDer(seed);
+    try {
+      const privateKey = nodeCrypto.createPrivateKey({ key: der, format: "der", type: "pkcs8" });
+      const publicKey = nodeCrypto.createPublicKey(privateKey);
+      const pkDer = publicKey.export({ type: "spki", format: "der" });
+      const pk = new Uint8Array(pkDer.subarray(pkDer.length - 32));
+      const sk = new Uint8Array(64);
+      sk.set(seed);
+      sk.set(pk, 32);
+      return { sk, pk };
+    } finally {
+      der.fill(0);
+    }
   };
 
   _nativeSign = (message, seed) => {
-    const der = Buffer.concat([_ED25519_SK_DER_PREFIX, Buffer.from(seed)]);
-    const privateKey = nodeCrypto.createPrivateKey({ key: der, format: "der", type: "pkcs8" });
-    return new Uint8Array(nodeCrypto.sign(null, Buffer.from(message), privateKey));
+    const der = _ed25519PrivateDer(seed);
+    try {
+      const privateKey = nodeCrypto.createPrivateKey({ key: der, format: "der", type: "pkcs8" });
+      return new Uint8Array(nodeCrypto.sign(null, Buffer.from(message), privateKey));
+    } finally {
+      der.fill(0);
+    }
   };
 
   _nativeVerify = (message, sig, pk) => {
@@ -2091,13 +2132,9 @@ function _publicKeyFromSeed(seed) {
     throw new Error("Ed25519 seed must be a 32-byte Uint8Array");
   }
   if (_nativeKeygen) return _nativeKeygen(seed).pk;
-
-  const h = sha512(seed);
-  const a = bytesToBigIntLE(clamp(h));
-  const pkPoint = scalarMultBase(a);
-  const pkBytes = encodePoint(pkPoint);
-  zeroize(h);
-  return pkBytes;
+  throw new Error(
+    "Ed25519 keygen requires native Ed25519; pure-JS secret scalar fallback is disabled because BigInt secrets cannot be zeroized"
+  );
 }
 
 function ed25519Keygen(seed) {
@@ -2125,46 +2162,9 @@ function ed25519Sign(message, skBytes) {
   }
 
   if (_nativeSign) return _nativeSign(message, skBytes.subarray(0, 32));
-
-  const h = sha512(seed);
-  const a = bytesToBigIntLE(clamp(h));
-  const prefix = new Uint8Array(h.subarray(32, 64));
-
-  // r = SHA-512(prefix || message) mod L
-  const rInput = new Uint8Array(prefix.length + message.length);
-  rInput.set(prefix);
-  rInput.set(message, prefix.length);
-  const r = bytesToBigIntLE(sha512(rInput)) % L;
-
-  // R = r * G
-  const R = scalarMultBase(r);
-  const rBytes = encodePoint(R);
-
-  // S = (r + SHA-512(R || pk || message) * a) mod L
-  const hramInput = new Uint8Array(32 + 32 + message.length);
-  hramInput.set(rBytes);
-  hramInput.set(pkBytes, 32);
-  hramInput.set(message, 64);
-  const hram = bytesToBigIntLE(sha512(hramInput)) % L;
-  const S = (r + hram * a) % L;
-
-  // Encode S as 32 bytes LE
-  const sBytes = new Uint8Array(32);
-  let ss = S;
-  for (let i = 0; i < 32; i++) {
-    sBytes[i] = Number(ss & 0xffn);
-    ss >>= 8n;
-  }
-
-  // Best-effort cleanup of secret intermediates
-  zeroize(h);
-  zeroize(prefix);
-  zeroize(rInput);
-
-  const sig = new Uint8Array(64);
-  sig.set(rBytes);
-  sig.set(sBytes, 32);
-  return sig;
+  throw new Error(
+    "Ed25519 signing requires native Ed25519; pure-JS secret scalar fallback is disabled because BigInt secrets cannot be zeroized"
+  );
 }
 
 function ed25519Verify(message, sigBytes, pkBytes) {
@@ -2326,24 +2326,44 @@ try {
     "302a300506032b656e032100", "hex"
   );
   const nodeCrypto = require("crypto");
+
+  function _x25519PrivateDer(sk) {
+    const der = Buffer.allocUnsafeSlow(_X25519_SK_DER_PREFIX.length + sk.length);
+    _X25519_SK_DER_PREFIX.copy(der, 0);
+    for (let i = 0; i < sk.length; i++) der[_X25519_SK_DER_PREFIX.length + i] = sk[i];
+    return der;
+  }
+
   // Probe: create a test X25519 key
-  const _probe = Buffer.concat([_X25519_SK_DER_PREFIX, Buffer.alloc(32)]);
-  nodeCrypto.createPrivateKey({ key: _probe, format: "der", type: "pkcs8" });
+  const _probe = _x25519PrivateDer(new Uint8Array(32));
+  try {
+    nodeCrypto.createPrivateKey({ key: _probe, format: "der", type: "pkcs8" });
+  } finally {
+    _probe.fill(0);
+  }
 
   _nativeX25519Keygen = (sk) => {
-    const der = Buffer.concat([_X25519_SK_DER_PREFIX, Buffer.from(sk)]);
-    const privateKey = nodeCrypto.createPrivateKey({ key: der, format: "der", type: "pkcs8" });
-    const publicKey = nodeCrypto.createPublicKey(privateKey);
-    const pkDer = publicKey.export({ type: "spki", format: "der" });
-    return new Uint8Array(pkDer.subarray(pkDer.length - 32));
+    const der = _x25519PrivateDer(sk);
+    try {
+      const privateKey = nodeCrypto.createPrivateKey({ key: der, format: "der", type: "pkcs8" });
+      const publicKey = nodeCrypto.createPublicKey(privateKey);
+      const pkDer = publicKey.export({ type: "spki", format: "der" });
+      return new Uint8Array(pkDer.subarray(pkDer.length - 32));
+    } finally {
+      der.fill(0);
+    }
   };
 
   _nativeX25519DH = (sk, pk) => {
-    const skDer = Buffer.concat([_X25519_SK_DER_PREFIX, Buffer.from(sk)]);
+    const skDer = _x25519PrivateDer(sk);
     const pkDer = Buffer.concat([_X25519_PK_DER_PREFIX, Buffer.from(pk)]);
-    const privateKey = nodeCrypto.createPrivateKey({ key: skDer, format: "der", type: "pkcs8" });
-    const publicKey = nodeCrypto.createPublicKey({ key: pkDer, format: "der", type: "spki" });
-    return new Uint8Array(nodeCrypto.diffieHellman({ privateKey, publicKey }));
+    try {
+      const privateKey = nodeCrypto.createPrivateKey({ key: skDer, format: "der", type: "pkcs8" });
+      const publicKey = nodeCrypto.createPublicKey({ key: pkDer, format: "der", type: "spki" });
+      return new Uint8Array(nodeCrypto.diffieHellman({ privateKey, publicKey }));
+    } finally {
+      skDer.fill(0);
+    }
   };
 } catch (_) {
   // Native X25519 not available — pure JS fallback
@@ -6152,18 +6172,24 @@ function ghashUpdate(Y, H, data) {
   }
 }
 
+function _xorGhashLength64(Y, offset, byteLen) {
+  const bits = byteLen * 8;
+  const hi = Math.floor(bits / 0x100000000);
+  const lo = bits >>> 0;
+  Y[offset]     ^= (hi >>> 24) & 0xff;
+  Y[offset + 1] ^= (hi >>> 16) & 0xff;
+  Y[offset + 2] ^= (hi >>> 8)  & 0xff;
+  Y[offset + 3] ^=  hi         & 0xff;
+  Y[offset + 4] ^= (lo >>> 24) & 0xff;
+  Y[offset + 5] ^= (lo >>> 16) & 0xff;
+  Y[offset + 6] ^= (lo >>> 8)  & 0xff;
+  Y[offset + 7] ^=  lo         & 0xff;
+}
+
 function ghashFinalize(Y, H, aadLen, ctLen) {
   // Process the length block: len_AAD (64-bit) || len_CT (64-bit), in bits
-  const aadBits = aadLen * 8;
-  const ctBits = ctLen * 8;
-  Y[4]  ^= (aadBits >>> 24) & 0xff;
-  Y[5]  ^= (aadBits >>> 16) & 0xff;
-  Y[6]  ^= (aadBits >>> 8)  & 0xff;
-  Y[7]  ^=  aadBits         & 0xff;
-  Y[12] ^= (ctBits >>> 24) & 0xff;
-  Y[13] ^= (ctBits >>> 16) & 0xff;
-  Y[14] ^= (ctBits >>> 8)  & 0xff;
-  Y[15] ^=  ctBits         & 0xff;
+  _xorGhashLength64(Y, 0, aadLen);
+  _xorGhashLength64(Y, 8, ctLen);
   ghashBlock(Y, H);
 }
 

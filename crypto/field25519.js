@@ -32,6 +32,9 @@ function feCopy(a) {
 
 // Load from 32-byte little-endian encoding
 function feFromBytes(b) {
+  if (!(b instanceof Uint8Array) || b.length !== 32) {
+    throw new Error("feFromBytes: expected 32 bytes");
+  }
   const o = new Float64Array(_NLIMBS);
   for (let i = 0; i < _NLIMBS; i++) {
     o[i] = b[2 * i] | (b[2 * i + 1] << 8);
@@ -54,6 +57,9 @@ function _feCarry(o) {
 
 // Encode to 32-byte little-endian, fully reduced mod p
 function feToBytes(a) {
+  if (!a || a.length !== _NLIMBS) {
+    throw new Error("feToBytes: expected " + _NLIMBS + " limbs");
+  }
   const t = feCopy(a);
   _feReduce(t);
   const o = new Uint8Array(32);

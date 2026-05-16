@@ -337,6 +337,7 @@ IIFE_HEADER = """\
 //
 // Crypto-only build: all cryptographic primitives + key derivation.
 // No wordlists, no word resolution, no language data (~75% smaller).
+// mirrors modules/uqs/crypto.py for wallet parity tests.
 //
 // Usage:
 //   <script src="uqs-crypto.js"><\\/script>

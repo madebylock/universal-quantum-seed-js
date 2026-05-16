@@ -183,18 +183,24 @@ function ghashUpdate(Y, H, data) {
   }
 }
 
+function _xorGhashLength64(Y, offset, byteLen) {
+  const bits = byteLen * 8;
+  const hi = Math.floor(bits / 0x100000000);
+  const lo = bits >>> 0;
+  Y[offset]     ^= (hi >>> 24) & 0xff;
+  Y[offset + 1] ^= (hi >>> 16) & 0xff;
+  Y[offset + 2] ^= (hi >>> 8)  & 0xff;
+  Y[offset + 3] ^=  hi         & 0xff;
+  Y[offset + 4] ^= (lo >>> 24) & 0xff;
+  Y[offset + 5] ^= (lo >>> 16) & 0xff;
+  Y[offset + 6] ^= (lo >>> 8)  & 0xff;
+  Y[offset + 7] ^=  lo         & 0xff;
+}
+
 function ghashFinalize(Y, H, aadLen, ctLen) {
   // Process the length block: len_AAD (64-bit) || len_CT (64-bit), in bits
-  const aadBits = aadLen * 8;
-  const ctBits = ctLen * 8;
-  Y[4]  ^= (aadBits >>> 24) & 0xff;
-  Y[5]  ^= (aadBits >>> 16) & 0xff;
-  Y[6]  ^= (aadBits >>> 8)  & 0xff;
-  Y[7]  ^=  aadBits         & 0xff;
-  Y[12] ^= (ctBits >>> 24) & 0xff;
-  Y[13] ^= (ctBits >>> 16) & 0xff;
-  Y[14] ^= (ctBits >>> 8)  & 0xff;
-  Y[15] ^=  ctBits         & 0xff;
+  _xorGhashLength64(Y, 0, aadLen);
+  _xorGhashLength64(Y, 8, ctLen);
   ghashBlock(Y, H);
 }
 

@@ -387,10 +387,7 @@ function argon2id(password, salt, timeCost, memoryCost, parallelism, hashLen) {
 
 // ── Async Argon2id (Web Worker) ─────────────────────────────────
 
-let _workerURL = null;
-
-function _getWorkerURL() {
-  if (_workerURL) return _workerURL;
+function _createWorkerURL() {
   // Build a self-contained worker script from the functions above
   const src = `"use strict";
 ${le32.toString()}
@@ -421,34 +418,40 @@ self.onmessage=function(e){
   self.postMessage(r.buffer,[r.buffer]);
 };`;
   const blob = new Blob([src], { type: "application/javascript" });
-  _workerURL = URL.createObjectURL(blob);
-  return _workerURL;
+  return URL.createObjectURL(blob);
 }
 
 function argon2idAsync(password, salt, timeCost, memoryCost, parallelism, hashLen) {
   if (typeof Worker !== "undefined" && typeof Blob !== "undefined" && typeof URL !== "undefined" && URL.createObjectURL) {
-    return new Promise(function(resolve) {
+    return new Promise(function(resolve, reject) {
+      var url = null;
+      var w = null;
+      function cleanup() {
+        if (w) w.terminate();
+        if (url) URL.revokeObjectURL(url);
+      }
       try {
-        var url = _getWorkerURL();
-        var w = new Worker(url);
+        url = _createWorkerURL();
+        w = new Worker(url);
         w.onmessage = function(e) {
-          w.terminate();
+          cleanup();
           resolve(new Uint8Array(e.data));
         };
-        w.onerror = function() {
-          w.terminate();
-          resolve(argon2id(password, salt, timeCost, memoryCost, parallelism, hashLen));
+        w.onerror = function(err) {
+          cleanup();
+          reject(err || new Error("argon2idAsync worker failed; refusing synchronous main-thread fallback"));
         };
         // Transfer copies of the typed array data
         var pw = password.slice().buffer;
         var sl = salt.slice().buffer;
         w.postMessage({ password: pw, salt: sl, t: timeCost, m: memoryCost, p: parallelism, hashLen: hashLen }, [pw, sl]);
-      } catch(_) {
-        resolve(argon2id(password, salt, timeCost, memoryCost, parallelism, hashLen));
+      } catch(err) {
+        cleanup();
+        reject(err || new Error("argon2idAsync setup failed; refusing synchronous main-thread fallback"));
       }
     });
   }
-  return Promise.resolve(argon2id(password, salt, timeCost, memoryCost, parallelism, hashLen));
+  return Promise.reject(new Error("argon2idAsync requires Web Worker; refusing synchronous main-thread fallback"));
 }
 
 module.exports = { argon2id, argon2idAsync, blake2b };
