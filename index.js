@@ -87,6 +87,10 @@ module.exports = {
   hybridKemKeygen: crypto.hybridKemKeygen,
   hybridKemEncaps: crypto.hybridKemEncaps,
   hybridKemDecaps: crypto.hybridKemDecaps,
+  normalizeHybridKemVersion: crypto.normalizeHybridKemVersion,
+  getSupportedHybridKemVersions: crypto.getSupportedHybridKemVersions,
+  HYBRID_KEM_VERSION: crypto.HYBRID_KEM_VERSION,
+  SUPPORTED_HYBRID_KEM_VERSIONS: crypto.SUPPORTED_HYBRID_KEM_VERSIONS,
 
   // Argon2id (RFC 9106) — Memory-hard KDF
   argon2id: crypto.argon2id,

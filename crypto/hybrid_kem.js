@@ -47,12 +47,49 @@ const HYBRID_KEM_EK_SIZE = _X25519_PK + _ML_KEM_EK;    // 1,216
 const HYBRID_KEM_DK_SIZE = _X25519_SK + _ML_KEM_DK;    // 2,432
 const HYBRID_KEM_CT_SIZE = _X25519_PK + _ML_KEM_CT;    // 1,120
 
+const _DOMAIN_V1 = new Uint8Array([
+  0x68, 0x79, 0x62, 0x72, 0x69, 0x64, 0x2d, 0x6b, // "hybrid-k"
+  0x65, 0x6d, 0x2d, 0x76, 0x31, // "em-v1"
+]);
+const HYBRID_KEM_VERSION = 1;
+const SUPPORTED_HYBRID_KEM_VERSIONS = Object.freeze([HYBRID_KEM_VERSION]);
+const _VERSION_DOMAINS = Object.freeze({
+  [HYBRID_KEM_VERSION]: _DOMAIN_V1,
+});
+
+function normalizeHybridKemVersion(version = HYBRID_KEM_VERSION) {
+  if (version === undefined || version === null || version === "") return HYBRID_KEM_VERSION;
+  let versionNumber;
+  if (typeof version === "string") {
+    let raw = version.trim().toLowerCase();
+    if (raw.startsWith("v")) raw = raw.slice(1);
+    if (!/^\d+$/.test(raw)) {
+      throw new Error(`Unsupported hybrid KEM version: ${version}`);
+    }
+    versionNumber = Number(raw);
+  } else {
+    versionNumber = Number(version);
+  }
+  if (!Number.isInteger(versionNumber) || !SUPPORTED_HYBRID_KEM_VERSIONS.includes(versionNumber)) {
+    throw new Error(`Unsupported hybrid KEM version: ${versionNumber}`);
+  }
+  return versionNumber;
+}
+
+function getSupportedHybridKemVersions() {
+  return [...SUPPORTED_HYBRID_KEM_VERSIONS];
+}
+
+function _domainForVersion(version = HYBRID_KEM_VERSION) {
+  return _VERSION_DOMAINS[normalizeHybridKemVersion(version)];
+}
+
 /**
  * Combine X25519 and ML-KEM shared secrets via ciphertext-bound HKDF.
  *
  *   salt = SHA-256(x25519_ct || ml_kem_ct)
  *   PRK  = HMAC-SHA256(salt, x25519_ss || ml_kem_ss)    // HKDF-Extract
- *   info = "hybrid-kem-v1" || SHA-256(x25519_pk || ml_kem_ek) || 0x01
+ *   info = domain(version) || SHA-256(x25519_pk || ml_kem_ek) || 0x01
  *   SS   = HMAC-SHA256(PRK, info)                        // HKDF-Expand
  *
  * Binding:
@@ -60,7 +97,7 @@ const HYBRID_KEM_CT_SIZE = _X25519_PK + _ML_KEM_CT;    // 1,120
  *   - Receiver public keys into the info prevents cross-context reuse.
  */
 function _combineSecrets(x25519Ss, mlKemSs, x25519Ct, mlKemCt,
-                         x25519Pk, mlKemEk) {
+                         x25519Pk, mlKemEk, version = HYBRID_KEM_VERSION) {
   // salt = SHA-256(x25519_ct || ml_kem_ct)
   const ctConcat = new Uint8Array(x25519Ct.length + mlKemCt.length);
   ctConcat.set(x25519Ct);
@@ -73,16 +110,13 @@ function _combineSecrets(x25519Ss, mlKemSs, x25519Ct, mlKemCt,
   ssConcat.set(mlKemSs, x25519Ss.length);
   const prk = hmacSha256(salt, ssConcat);
 
-  // info = "hybrid-kem-v1" || SHA-256(x25519_pk || ml_kem_ek) || 0x01
+  // info = domain(version) || SHA-256(x25519_pk || ml_kem_ek) || 0x01
   const pkConcat = new Uint8Array(x25519Pk.length + mlKemEk.length);
   pkConcat.set(x25519Pk);
   pkConcat.set(mlKemEk, x25519Pk.length);
   const pkHash = sha256(pkConcat);
 
-  const label = new Uint8Array([
-    0x68, 0x79, 0x62, 0x72, 0x69, 0x64, 0x2d, 0x6b, // "hybrid-k"
-    0x65, 0x6d, 0x2d, 0x76, 0x31, // "em-v1"
-  ]);
+  const label = _domainForVersion(version);
   const info = new Uint8Array(label.length + pkHash.length + 1);
   info.set(label);
   info.set(pkHash, label.length);
@@ -136,12 +170,14 @@ function hybridKemKeygen(seed) {
  *
  * @param {Uint8Array} ek - 1,216-byte hybrid encapsulation key
  * @param {Uint8Array} [randomnessIn] - 64 bytes (32B X25519 ephemeral + 32B ML-KEM), or null
+ * @param {number|string} [version=1] - Hybrid KEM wire-format version
  * @returns {{ ct: Uint8Array, ss: Uint8Array }} ct: 1,120 bytes, ss: 32 bytes
  */
-function hybridKemEncaps(ek, randomnessIn) {
+function hybridKemEncaps(ek, randomnessIn, version = HYBRID_KEM_VERSION) {
   if (!(ek instanceof Uint8Array) || ek.length !== HYBRID_KEM_EK_SIZE) {
     throw new Error(`Hybrid KEM ek must be ${HYBRID_KEM_EK_SIZE} bytes, got ${ek ? ek.length : 0}`);
   }
+  version = normalizeHybridKemVersion(version);
 
   let x25519Randomness;
   let mlKemRandomness;
@@ -170,7 +206,7 @@ function hybridKemEncaps(ek, randomnessIn) {
   ct.set(eph.pk);
   ct.set(mlResult.ct, _X25519_PK);
 
-  const ss = _combineSecrets(xSs, mlResult.ss, eph.pk, mlResult.ct, xPk, mlEk);
+  const ss = _combineSecrets(xSs, mlResult.ss, eph.pk, mlResult.ct, xPk, mlEk, version);
 
   // Best-effort cleanup of component shared secrets
   zeroize(xSs);
@@ -185,15 +221,17 @@ function hybridKemEncaps(ek, randomnessIn) {
  *
  * @param {Uint8Array} dk - 2,432-byte hybrid decapsulation key
  * @param {Uint8Array} ct - 1,120-byte hybrid ciphertext
+ * @param {number|string} [version=1] - Hybrid KEM wire-format version
  * @returns {Uint8Array} 32-byte combined shared secret
  */
-function hybridKemDecaps(dk, ct) {
+function hybridKemDecaps(dk, ct, version = HYBRID_KEM_VERSION) {
   if (!(dk instanceof Uint8Array) || dk.length !== HYBRID_KEM_DK_SIZE) {
     throw new Error(`Hybrid KEM dk must be ${HYBRID_KEM_DK_SIZE} bytes, got ${dk ? dk.length : 0}`);
   }
   if (!(ct instanceof Uint8Array) || ct.length !== HYBRID_KEM_CT_SIZE) {
     throw new Error(`Hybrid KEM ct must be ${HYBRID_KEM_CT_SIZE} bytes, got ${ct ? ct.length : 0}`);
   }
+  version = normalizeHybridKemVersion(version);
 
   const xSk = dk.subarray(0, _X25519_SK);
   const mlDk = dk.subarray(_X25519_SK);
@@ -212,7 +250,7 @@ function hybridKemDecaps(dk, ct) {
   const mlSs = mlKemDecaps(mlDk, mlCt);
 
   // Combine shared secrets with ciphertext + public key binding
-  const ss = _combineSecrets(xSs, mlSs, ephPk, mlCt, xPk, mlEk);
+  const ss = _combineSecrets(xSs, mlSs, ephPk, mlCt, xPk, mlEk, version);
 
   // Best-effort cleanup of component shared secrets
   zeroize(xSs);
@@ -225,7 +263,11 @@ module.exports = {
   hybridKemKeygen,
   hybridKemEncaps,
   hybridKemDecaps,
+  normalizeHybridKemVersion,
+  getSupportedHybridKemVersions,
   HYBRID_KEM_EK_SIZE,
   HYBRID_KEM_DK_SIZE,
   HYBRID_KEM_CT_SIZE,
+  HYBRID_KEM_VERSION,
+  SUPPORTED_HYBRID_KEM_VERSIONS,
 };

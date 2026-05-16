@@ -26,7 +26,15 @@ const {
   hybridDsaVerify,
   normalizeHybridDsaVersion,
 } = require("./hybrid_dsa");
-const { hybridKemKeygen, hybridKemEncaps, hybridKemDecaps } = require("./hybrid_kem");
+const {
+  HYBRID_KEM_VERSION,
+  SUPPORTED_HYBRID_KEM_VERSIONS,
+  getSupportedHybridKemVersions,
+  hybridKemKeygen,
+  hybridKemEncaps,
+  hybridKemDecaps,
+  normalizeHybridKemVersion,
+} = require("./hybrid_kem");
 const { argon2id, blake2b } = require("./argon2");
 const { aesGcmEncrypt, aesGcmDecrypt, aesGcmEncryptAsync, aesGcmDecryptAsync } = require("./aes_gcm");
 
@@ -66,6 +74,8 @@ module.exports = {
 
   // Hybrid X25519 + ML-KEM-768 — Classical + post-quantum KEM
   hybridKemKeygen, hybridKemEncaps, hybridKemDecaps,
+  normalizeHybridKemVersion, getSupportedHybridKemVersions,
+  HYBRID_KEM_VERSION, SUPPORTED_HYBRID_KEM_VERSIONS,
 
   // Argon2id (RFC 9106) — Memory-hard KDF
   argon2id, blake2b,
