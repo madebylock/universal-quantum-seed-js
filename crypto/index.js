@@ -20,6 +20,7 @@ const { x25519Keygen, x25519 } = require("./x25519");
 const {
   HYBRID_DSA_VERSION,
   SUPPORTED_HYBRID_DSA_VERSIONS,
+  HYBRID_DSA_COMPONENT_ALGORITHMS,
   getSupportedHybridDsaVersions,
   hybridDsaKeygen,
   hybridDsaSign,
@@ -29,6 +30,7 @@ const {
 const {
   HYBRID_KEM_VERSION,
   SUPPORTED_HYBRID_KEM_VERSIONS,
+  HYBRID_KEM_COMPONENT_ALGORITHMS,
   getSupportedHybridKemVersions,
   hybridKemKeygen,
   hybridKemEncaps,
@@ -71,11 +73,13 @@ module.exports = {
   hybridDsaKeygen, hybridDsaSign, hybridDsaVerify,
   normalizeHybridDsaVersion, getSupportedHybridDsaVersions,
   HYBRID_DSA_VERSION, SUPPORTED_HYBRID_DSA_VERSIONS,
+  HYBRID_DSA_COMPONENT_ALGORITHMS,
 
   // Hybrid X25519 + ML-KEM-768 — Classical + post-quantum KEM
   hybridKemKeygen, hybridKemEncaps, hybridKemDecaps,
   normalizeHybridKemVersion, getSupportedHybridKemVersions,
   HYBRID_KEM_VERSION, SUPPORTED_HYBRID_KEM_VERSIONS,
+  HYBRID_KEM_COMPONENT_ALGORITHMS,
 
   // Argon2id (RFC 9106) — Memory-hard KDF
   argon2id, blake2b,

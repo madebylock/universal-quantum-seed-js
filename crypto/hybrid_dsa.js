@@ -40,6 +40,7 @@ const _ML_DSA_SIG = 3309;
 const HYBRID_DSA_SK_SIZE = _ED25519_SK + _ML_DSA_SK;    // 4,096
 const HYBRID_DSA_PK_SIZE = _ED25519_PK + _ML_DSA_PK;    // 1,984
 const HYBRID_DSA_SIG_SIZE = _ED25519_SIG + _ML_DSA_SIG;  // 3,373
+const HYBRID_DSA_COMPONENT_ALGORITHMS = Object.freeze(["Ed25519", "ML-DSA-65"]);
 
 // Domain prefix for stripping resistance.
 const _DOMAIN = new TextEncoder().encode("hybrid-dsa-v1");
@@ -223,4 +224,5 @@ module.exports = {
   HYBRID_DSA_SK_SIZE,
   HYBRID_DSA_PK_SIZE,
   HYBRID_DSA_SIG_SIZE,
+  HYBRID_DSA_COMPONENT_ALGORITHMS,
 };

@@ -5494,6 +5494,7 @@ const _ML_DSA_SIG = 3309;
 const HYBRID_DSA_SK_SIZE = _ED25519_SK + _ML_DSA_SK;    // 4,096
 const HYBRID_DSA_PK_SIZE = _ED25519_PK + _ML_DSA_PK;    // 1,984
 const HYBRID_DSA_SIG_SIZE = _ED25519_SIG + _ML_DSA_SIG;  // 3,373
+const HYBRID_DSA_COMPONENT_ALGORITHMS = Object.freeze(["Ed25519", "ML-DSA-65"]);
 
 // Domain prefix for stripping resistance.
 const _DOMAIN = new TextEncoder().encode("hybrid-dsa-v1");
@@ -5677,6 +5678,7 @@ module.exports = {
   HYBRID_DSA_SK_SIZE,
   HYBRID_DSA_PK_SIZE,
   HYBRID_DSA_SIG_SIZE,
+  HYBRID_DSA_COMPONENT_ALGORITHMS,
 };
 
 };
@@ -5732,6 +5734,7 @@ const _ML_KEM_CT = ML_KEM_CT_SIZE;
 const HYBRID_KEM_EK_SIZE = _X25519_PK + _ML_KEM_EK;    // 1,216
 const HYBRID_KEM_DK_SIZE = _X25519_SK + _ML_KEM_DK;    // 2,432
 const HYBRID_KEM_CT_SIZE = _X25519_PK + _ML_KEM_CT;    // 1,120
+const HYBRID_KEM_COMPONENT_ALGORITHMS = Object.freeze(["X25519", "ML-KEM-768"]);
 
 const _DOMAIN_V1 = new Uint8Array([
   0x68, 0x79, 0x62, 0x72, 0x69, 0x64, 0x2d, 0x6b, // "hybrid-k"
@@ -5954,6 +5957,7 @@ module.exports = {
   HYBRID_KEM_EK_SIZE,
   HYBRID_KEM_DK_SIZE,
   HYBRID_KEM_CT_SIZE,
+  HYBRID_KEM_COMPONENT_ALGORITHMS,
   HYBRID_KEM_VERSION,
   SUPPORTED_HYBRID_KEM_VERSIONS,
 };
@@ -6374,6 +6378,7 @@ const { x25519Keygen, x25519 } = require("./x25519");
 const {
   HYBRID_DSA_VERSION,
   SUPPORTED_HYBRID_DSA_VERSIONS,
+  HYBRID_DSA_COMPONENT_ALGORITHMS,
   getSupportedHybridDsaVersions,
   hybridDsaKeygen,
   hybridDsaSign,
@@ -6383,6 +6388,7 @@ const {
 const {
   HYBRID_KEM_VERSION,
   SUPPORTED_HYBRID_KEM_VERSIONS,
+  HYBRID_KEM_COMPONENT_ALGORITHMS,
   getSupportedHybridKemVersions,
   hybridKemKeygen,
   hybridKemEncaps,
@@ -6425,11 +6431,13 @@ module.exports = {
   hybridDsaKeygen, hybridDsaSign, hybridDsaVerify,
   normalizeHybridDsaVersion, getSupportedHybridDsaVersions,
   HYBRID_DSA_VERSION, SUPPORTED_HYBRID_DSA_VERSIONS,
+  HYBRID_DSA_COMPONENT_ALGORITHMS,
 
   // Hybrid X25519 + ML-KEM-768 — Classical + post-quantum KEM
   hybridKemKeygen, hybridKemEncaps, hybridKemDecaps,
   normalizeHybridKemVersion, getSupportedHybridKemVersions,
   HYBRID_KEM_VERSION, SUPPORTED_HYBRID_KEM_VERSIONS,
+  HYBRID_KEM_COMPONENT_ALGORITHMS,
 
   // Argon2id (RFC 9106) — Memory-hard KDF
   argon2id, blake2b,

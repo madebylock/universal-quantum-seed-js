@@ -82,6 +82,7 @@ module.exports = {
   getSupportedHybridDsaVersions: crypto.getSupportedHybridDsaVersions,
   HYBRID_DSA_VERSION: crypto.HYBRID_DSA_VERSION,
   SUPPORTED_HYBRID_DSA_VERSIONS: crypto.SUPPORTED_HYBRID_DSA_VERSIONS,
+  HYBRID_DSA_COMPONENT_ALGORITHMS: crypto.HYBRID_DSA_COMPONENT_ALGORITHMS,
 
   // Hybrid X25519 + ML-KEM-768 — Classical + PQ KEM
   hybridKemKeygen: crypto.hybridKemKeygen,
@@ -91,6 +92,7 @@ module.exports = {
   getSupportedHybridKemVersions: crypto.getSupportedHybridKemVersions,
   HYBRID_KEM_VERSION: crypto.HYBRID_KEM_VERSION,
   SUPPORTED_HYBRID_KEM_VERSIONS: crypto.SUPPORTED_HYBRID_KEM_VERSIONS,
+  HYBRID_KEM_COMPONENT_ALGORITHMS: crypto.HYBRID_KEM_COMPONENT_ALGORITHMS,
 
   // Argon2id (RFC 9106) — Memory-hard KDF
   argon2id: crypto.argon2id,
