@@ -129,6 +129,12 @@ function aesBlock(s, rk) {
 // NIST SP 800-38D maximum: 2^39 - 256 bits = (2^36 - 32) bytes
 // NOTE: Must use Math.pow — JS bitwise shifts truncate to 32 bits.
 const MAX_PLAINTEXT_BYTES = Math.pow(2, 36) - 32;
+// NIST SP 800-38D §5.2.1.1: AAD <= 2^64 bits = 2^61 bytes - 1.
+// JS Number.MAX_SAFE_INTEGER (2^53 - 1) is lower than the spec cap, so any
+// AAD length JS can represent in a Uint8Array is already in-spec — but we
+// still bound it explicitly to catch caller mistakes and to fail loudly if
+// a future buffer-like type lifts the addressable size.
+const MAX_AAD_BYTES = Number.MAX_SAFE_INTEGER;
 
 function incCtr(ctr) {
   for (let i = 15; i >= 12; i--) {
@@ -226,6 +232,9 @@ function aesGcmEncrypt(key, nonce, plaintext, aad) {
   if (plaintext.length > MAX_PLAINTEXT_BYTES) {
     throw new Error("Plaintext (" + plaintext.length + " bytes) exceeds NIST SP 800-38D maximum");
   }
+  if (aad.length > MAX_AAD_BYTES) {
+    throw new Error("AAD (" + aad.length + " bytes) exceeds safe integer bound");
+  }
 
   if (_nativeEncrypt) return _nativeEncrypt(key, nonce, plaintext, aad);
 
@@ -293,6 +302,9 @@ function aesGcmDecrypt(key, nonce, ciphertextWithTag, aad) {
 
   if (ciphertextWithTag.length - 16 > MAX_PLAINTEXT_BYTES) {
     throw new Error("Ciphertext payload (" + (ciphertextWithTag.length - 16) + " bytes) exceeds NIST SP 800-38D maximum");
+  }
+  if (aad.length > MAX_AAD_BYTES) {
+    throw new Error("AAD (" + aad.length + " bytes) exceeds safe integer bound");
   }
 
   if (_nativeDecrypt) return _nativeDecrypt(key, nonce, ciphertextWithTag, aad);

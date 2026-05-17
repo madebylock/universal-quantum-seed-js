@@ -326,6 +326,13 @@ function argon2id(password, salt, timeCost, memoryCost, parallelism, hashLen) {
   if (salt.length < 8) {
     throw new Error("argon2id: salt must be >= 8 bytes, got " + salt.length);
   }
+  let saltAllZero = true;
+  for (let i = 0; i < salt.length; i++) {
+    if (salt[i] !== 0) { saltAllZero = false; break; }
+  }
+  if (saltAllZero) {
+    throw new Error("argon2id: salt cannot be all zeros");
+  }
 
   const p = parallelism, m = memoryCost, t = timeCost, T = hashLen;
 
