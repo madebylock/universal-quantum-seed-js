@@ -103,14 +103,26 @@ function _domainForVersion(version = UQS_VERSION) {
   return DOMAIN;
 }
 
-// KDF parameters
-const PBKDF2_ITERATIONS = 600000;
+// UQS v1 derivation compatibility boundary:
+// Keep these parameters stable for v1. Raising UQS_ARGON2_MEMORY_KIB changes
+// the deterministic master seed for every existing phrase. The 64 MiB, t=3,
+// p=4 profile matches RFC 9106's memory-constrained Argon2id recommendation
+// and is above OWASP's minimum guidance; heavier profiles must be introduced
+// only as a versioned UQS v2 KDF.
+const UQS_ARGON2_TIME_COST = 3;         // iterations
+const UQS_ARGON2_MEMORY_KIB = 65536;    // 64 MiB
+const UQS_ARGON2_PARALLELISM = 4;       // lanes
+const UQS_ARGON2_HASH_LENGTH = 64;      // output bytes
 
-// Argon2id parameters (OWASP recommended for high-value targets)
-const ARGON2_TIME = 3;         // iterations
-const ARGON2_MEMORY = 65536;   // 64 MiB
-const ARGON2_PARALLEL = 4;     // lanes
-const ARGON2_HASHLEN = 64;     // output bytes
+// PBKDF2 parameters — first stage of chained KDF
+const UQS_PBKDF2_ITERATIONS = 600000;
+
+// Backward-compat private aliases for internal callers.
+const ARGON2_TIME = UQS_ARGON2_TIME_COST;
+const ARGON2_MEMORY = UQS_ARGON2_MEMORY_KIB;
+const ARGON2_PARALLEL = UQS_ARGON2_PARALLELISM;
+const ARGON2_HASHLEN = UQS_ARGON2_HASH_LENGTH;
+const PBKDF2_ITERATIONS = UQS_PBKDF2_ITERATIONS;
 
 // Build sorted keys for binary search
 const SORTED_KEYS = Object.keys(LOOKUP).sort();
@@ -1013,6 +1025,11 @@ module.exports = {
   VERSION,
   UQS_VERSION,
   SUPPORTED_UQS_VERSIONS,
+  UQS_ARGON2_TIME_COST,
+  UQS_ARGON2_MEMORY_KIB,
+  UQS_ARGON2_PARALLELISM,
+  UQS_ARGON2_HASH_LENGTH,
+  UQS_PBKDF2_ITERATIONS,
   normalizeSeedVersion,
   getSupportedVersions,
   generateWords,

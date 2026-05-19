@@ -13,10 +13,11 @@
 //     Signature:   64 bytes (R || S)
 //
 // When Node.js crypto is available, uses native Ed25519 (constant-time OpenSSL).
-// Secret-key operations fail closed without native Ed25519 because the pure-JS
-// scalar path necessarily creates immutable BigInt secret intermediates that
-// cannot be zeroized from the JavaScript heap. Public verification remains
-// available as a pure-JS fallback.
+// Otherwise falls back to a pure-JS implementation so this package keeps its
+// "zero dependencies" guarantee in environments without a usable Node crypto
+// module. Note: the pure-JS path materializes the clamped scalar as a BigInt,
+// which cannot be zeroized — callers needing heap-zeroizable secret state must
+// use the native path or rotate the seed when finished.
 
 const { sha512 } = require("./sha2");
 const { toBytes, zeroize, constantTimeEqual } = require("./utils");
@@ -316,9 +317,10 @@ function _publicKeyFromSeed(seed) {
     throw new Error("Ed25519 seed must be a 32-byte Uint8Array");
   }
   if (_nativeKeygen) return _nativeKeygen(seed).pk;
-  throw new Error(
-    "Ed25519 keygen requires native Ed25519; pure-JS secret scalar fallback is disabled because BigInt secrets cannot be zeroized"
-  );
+  // Pure-JS fallback (RFC 8032): a = LE(clamp(SHA-512(seed)[:32])); pk = encode(a·G)
+  const h = sha512(seed);
+  const a = bytesToBigIntLE(clamp(h));
+  return encodePoint(scalarMultBase(a));
 }
 
 function ed25519Keygen(seed) {
@@ -346,9 +348,41 @@ function ed25519Sign(message, skBytes) {
   }
 
   if (_nativeSign) return _nativeSign(message, skBytes.subarray(0, 32));
-  throw new Error(
-    "Ed25519 signing requires native Ed25519; pure-JS secret scalar fallback is disabled because BigInt secrets cannot be zeroized"
-  );
+
+  // Pure-JS fallback (RFC 8032 §5.1.6)
+  const h = sha512(seed);
+  const a = bytesToBigIntLE(clamp(h));
+  const prefix = h.subarray(32, 64);
+
+  // r = SHA-512(prefix || message) mod L
+  const rInput = new Uint8Array(prefix.length + message.length);
+  rInput.set(prefix);
+  rInput.set(message, prefix.length);
+  const r = bytesToBigIntLE(sha512(rInput)) % L;
+
+  // R = r·G
+  const rBytes = encodePoint(scalarMultBase(r));
+
+  // S = (r + SHA-512(R || pk || message) * a) mod L
+  const hramInput = new Uint8Array(32 + 32 + message.length);
+  hramInput.set(rBytes);
+  hramInput.set(pkBytes, 32);
+  hramInput.set(message, 64);
+  const hram = bytesToBigIntLE(sha512(hramInput)) % L;
+  const S = (r + hram * a) % L;
+
+  // Encode S as 32 bytes LE
+  const sBytes = new Uint8Array(32);
+  let ss = S;
+  for (let i = 0; i < 32; i++) {
+    sBytes[i] = Number(ss & 0xffn);
+    ss >>= 8n;
+  }
+
+  const sig = new Uint8Array(64);
+  sig.set(rBytes);
+  sig.set(sBytes, 32);
+  return sig;
 }
 
 function ed25519Verify(message, sigBytes, pkBytes) {
