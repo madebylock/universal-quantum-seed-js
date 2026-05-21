@@ -1836,10 +1836,11 @@ _modules["./crypto/ed25519"] = function(module, exports, require) {
 //     Signature:   64 bytes (R || S)
 //
 // When Node.js crypto is available, uses native Ed25519 (constant-time OpenSSL).
-// Secret-key operations fail closed without native Ed25519 because the pure-JS
-// scalar path necessarily creates immutable BigInt secret intermediates that
-// cannot be zeroized from the JavaScript heap. Public verification remains
-// available as a pure-JS fallback.
+// Otherwise falls back to a pure-JS implementation so this package keeps its
+// "zero dependencies" guarantee in environments without a usable Node crypto
+// module. Note: the pure-JS path materializes the clamped scalar as a BigInt,
+// which cannot be zeroized — callers needing heap-zeroizable secret state must
+// use the native path or rotate the seed when finished.
 
 const { sha512 } = require("./sha2");
 const { toBytes, zeroize, constantTimeEqual } = require("./utils");
@@ -2139,9 +2140,10 @@ function _publicKeyFromSeed(seed) {
     throw new Error("Ed25519 seed must be a 32-byte Uint8Array");
   }
   if (_nativeKeygen) return _nativeKeygen(seed).pk;
-  throw new Error(
-    "Ed25519 keygen requires native Ed25519; pure-JS secret scalar fallback is disabled because BigInt secrets cannot be zeroized"
-  );
+  // Pure-JS fallback (RFC 8032): a = LE(clamp(SHA-512(seed)[:32])); pk = encode(a·G)
+  const h = sha512(seed);
+  const a = bytesToBigIntLE(clamp(h));
+  return encodePoint(scalarMultBase(a));
 }
 
 function ed25519Keygen(seed) {
@@ -2169,9 +2171,41 @@ function ed25519Sign(message, skBytes) {
   }
 
   if (_nativeSign) return _nativeSign(message, skBytes.subarray(0, 32));
-  throw new Error(
-    "Ed25519 signing requires native Ed25519; pure-JS secret scalar fallback is disabled because BigInt secrets cannot be zeroized"
-  );
+
+  // Pure-JS fallback (RFC 8032 §5.1.6)
+  const h = sha512(seed);
+  const a = bytesToBigIntLE(clamp(h));
+  const prefix = h.subarray(32, 64);
+
+  // r = SHA-512(prefix || message) mod L
+  const rInput = new Uint8Array(prefix.length + message.length);
+  rInput.set(prefix);
+  rInput.set(message, prefix.length);
+  const r = bytesToBigIntLE(sha512(rInput)) % L;
+
+  // R = r·G
+  const rBytes = encodePoint(scalarMultBase(r));
+
+  // S = (r + SHA-512(R || pk || message) * a) mod L
+  const hramInput = new Uint8Array(32 + 32 + message.length);
+  hramInput.set(rBytes);
+  hramInput.set(pkBytes, 32);
+  hramInput.set(message, 64);
+  const hram = bytesToBigIntLE(sha512(hramInput)) % L;
+  const S = (r + hram * a) % L;
+
+  // Encode S as 32 bytes LE
+  const sBytes = new Uint8Array(32);
+  let ss = S;
+  for (let i = 0; i < 32; i++) {
+    sBytes[i] = Number(ss & 0xffn);
+    ss >>= 8n;
+  }
+
+  const sig = new Uint8Array(64);
+  sig.set(rBytes);
+  sig.set(sBytes, 32);
+  return sig;
 }
 
 function ed25519Verify(message, sigBytes, pkBytes) {
@@ -5761,6 +5795,7 @@ const _ML_KEM_CT = ML_KEM_CT_SIZE;
 const HYBRID_KEM_EK_SIZE = _X25519_PK + _ML_KEM_EK;    // 1,216
 const HYBRID_KEM_DK_SIZE = _X25519_SK + _ML_KEM_DK;    // 2,432
 const HYBRID_KEM_CT_SIZE = _X25519_PK + _ML_KEM_CT;    // 1,120
+const HYBRID_KEM_SEED_LEN = 96;
 const HYBRID_KEM_COMPONENT_ALGORITHMS = Object.freeze(["X25519", "ML-KEM-768"]);
 
 const _DOMAIN_V1 = new Uint8Array([
@@ -5854,8 +5889,8 @@ function _combineSecrets(x25519Ss, mlKemSs, x25519Ct, mlKemCt,
  * @returns {{ ek: Uint8Array, dk: Uint8Array }} ek: 1,216 bytes, dk: 2,432 bytes
  */
 function hybridKemKeygen(seed) {
-  if (!(seed instanceof Uint8Array) || seed.length !== 96) {
-    throw new Error(`Hybrid KEM seed must be a 96-byte Uint8Array, got ${seed ? seed.length : 0}`);
+  if (!(seed instanceof Uint8Array) || seed.length !== HYBRID_KEM_SEED_LEN) {
+    throw new Error(`Hybrid KEM seed must be a ${HYBRID_KEM_SEED_LEN}-byte Uint8Array, got ${seed ? seed.length : 0}`);
   }
 
   // Copy halves into independent buffers so we can wipe them after keygen
@@ -5984,6 +6019,7 @@ module.exports = {
   HYBRID_KEM_EK_SIZE,
   HYBRID_KEM_DK_SIZE,
   HYBRID_KEM_CT_SIZE,
+  HYBRID_KEM_SEED_LEN,
   HYBRID_KEM_COMPONENT_ALGORITHMS,
   HYBRID_KEM_VERSION,
   SUPPORTED_HYBRID_KEM_VERSIONS,
@@ -6565,14 +6601,26 @@ function _domainForVersion(version = UQS_VERSION) {
   return DOMAIN;
 }
 
-// KDF parameters
-const PBKDF2_ITERATIONS = 600000;
+// UQS v1 derivation compatibility boundary:
+// Keep these parameters stable for v1. Raising UQS_ARGON2_MEMORY_KIB changes
+// the deterministic master seed for every existing phrase. The 64 MiB, t=3,
+// p=4 profile matches RFC 9106's memory-constrained Argon2id recommendation
+// and is above OWASP's minimum guidance; heavier profiles must be introduced
+// only as a versioned UQS v2 KDF.
+const UQS_ARGON2_TIME_COST = 3;         // iterations
+const UQS_ARGON2_MEMORY_KIB = 65536;    // 64 MiB
+const UQS_ARGON2_PARALLELISM = 4;       // lanes
+const UQS_ARGON2_HASH_LENGTH = 64;      // output bytes
 
-// Argon2id parameters (OWASP recommended for high-value targets)
-const ARGON2_TIME = 3;         // iterations
-const ARGON2_MEMORY = 65536;   // 64 MiB
-const ARGON2_PARALLEL = 4;     // lanes
-const ARGON2_HASHLEN = 64;     // output bytes
+// PBKDF2 parameters — first stage of chained KDF
+const UQS_PBKDF2_ITERATIONS = 600000;
+
+// Backward-compat private aliases for internal callers.
+const ARGON2_TIME = UQS_ARGON2_TIME_COST;
+const ARGON2_MEMORY = UQS_ARGON2_MEMORY_KIB;
+const ARGON2_PARALLEL = UQS_ARGON2_PARALLELISM;
+const ARGON2_HASHLEN = UQS_ARGON2_HASH_LENGTH;
+const PBKDF2_ITERATIONS = UQS_PBKDF2_ITERATIONS;
 
 
 
@@ -6952,6 +7000,14 @@ const QUANTUM_SEED_SIZES = {
   "hybrid-kem-768": 96,       // X25519 seed (32B) + ML-KEM-768 seed (64B d||z)
 };
 
+function _validateQuantumKeyIndex(keyIndex) {
+  if (typeof keyIndex === "boolean" || !Number.isInteger(keyIndex) ||
+      keyIndex < 0 || keyIndex > 0xFFFFFFFF) {
+    throw new Error("keyIndex must be an integer in [0, 4294967295]");
+  }
+  return keyIndex;
+}
+
 function getQuantumSeed(masterKey, algorithm = "ml-dsa-65", keyIndex = 0) {
   masterKey = toBytes(masterKey);
   if (masterKey.length !== 64) throw new Error(`masterKey must be 64 bytes, got ${masterKey.length}`);
@@ -6959,6 +7015,7 @@ function getQuantumSeed(masterKey, algorithm = "ml-dsa-65", keyIndex = 0) {
   if (size === undefined) {
     throw new Error(`Unknown quantum algorithm: '${algorithm}'. Supported: ${Object.keys(QUANTUM_SEED_SIZES).join(", ")}`);
   }
+  keyIndex = _validateQuantumKeyIndex(keyIndex);
   const info = concatBytes(DOMAIN, toBytes("-quantum-"), toBytes(algorithm), packLE_I(keyIndex));
   return hkdfExpand(masterKey, info, size);
 }

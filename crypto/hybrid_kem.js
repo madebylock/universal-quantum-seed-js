@@ -46,6 +46,7 @@ const _ML_KEM_CT = ML_KEM_CT_SIZE;
 const HYBRID_KEM_EK_SIZE = _X25519_PK + _ML_KEM_EK;    // 1,216
 const HYBRID_KEM_DK_SIZE = _X25519_SK + _ML_KEM_DK;    // 2,432
 const HYBRID_KEM_CT_SIZE = _X25519_PK + _ML_KEM_CT;    // 1,120
+const HYBRID_KEM_SEED_LEN = 96;
 const HYBRID_KEM_COMPONENT_ALGORITHMS = Object.freeze(["X25519", "ML-KEM-768"]);
 
 const _DOMAIN_V1 = new Uint8Array([
@@ -139,8 +140,8 @@ function _combineSecrets(x25519Ss, mlKemSs, x25519Ct, mlKemCt,
  * @returns {{ ek: Uint8Array, dk: Uint8Array }} ek: 1,216 bytes, dk: 2,432 bytes
  */
 function hybridKemKeygen(seed) {
-  if (!(seed instanceof Uint8Array) || seed.length !== 96) {
-    throw new Error(`Hybrid KEM seed must be a 96-byte Uint8Array, got ${seed ? seed.length : 0}`);
+  if (!(seed instanceof Uint8Array) || seed.length !== HYBRID_KEM_SEED_LEN) {
+    throw new Error(`Hybrid KEM seed must be a ${HYBRID_KEM_SEED_LEN}-byte Uint8Array, got ${seed ? seed.length : 0}`);
   }
 
   // Copy halves into independent buffers so we can wipe them after keygen
@@ -269,6 +270,7 @@ module.exports = {
   HYBRID_KEM_EK_SIZE,
   HYBRID_KEM_DK_SIZE,
   HYBRID_KEM_CT_SIZE,
+  HYBRID_KEM_SEED_LEN,
   HYBRID_KEM_COMPONENT_ALGORITHMS,
   HYBRID_KEM_VERSION,
   SUPPORTED_HYBRID_KEM_VERSIONS,

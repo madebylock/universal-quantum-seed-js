@@ -774,6 +774,14 @@ const QUANTUM_SEED_SIZES = {
   "hybrid-kem-768": 96,       // X25519 seed (32B) + ML-KEM-768 seed (64B d||z)
 };
 
+function _validateQuantumKeyIndex(keyIndex) {
+  if (typeof keyIndex === "boolean" || !Number.isInteger(keyIndex) ||
+      keyIndex < 0 || keyIndex > 0xFFFFFFFF) {
+    throw new Error("keyIndex must be an integer in [0, 4294967295]");
+  }
+  return keyIndex;
+}
+
 function getQuantumSeed(masterKey, algorithm = "ml-dsa-65", keyIndex = 0) {
   masterKey = toBytes(masterKey);
   if (masterKey.length !== 64) throw new Error(`masterKey must be 64 bytes, got ${masterKey.length}`);
@@ -781,6 +789,7 @@ function getQuantumSeed(masterKey, algorithm = "ml-dsa-65", keyIndex = 0) {
   if (size === undefined) {
     throw new Error(`Unknown quantum algorithm: '${algorithm}'. Supported: ${Object.keys(QUANTUM_SEED_SIZES).join(", ")}`);
   }
+  keyIndex = _validateQuantumKeyIndex(keyIndex);
   const info = concatBytes(DOMAIN, toBytes("-quantum-"), toBytes(algorithm), packLE_I(keyIndex));
   return hkdfExpand(masterKey, info, size);
 }
