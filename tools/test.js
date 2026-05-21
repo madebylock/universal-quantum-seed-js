@@ -861,13 +861,20 @@ var bobSk = hexToBytes("5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27
 var ss = x25519Raw(aliceSk, x25519Raw(bobSk, bp));
 check(bytesToHex(ss) === "4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742", "x25519 shared secret");
 
-// Ed25519 (keygen + sign + verify)
+// Ed25519: secret-key ops MUST fail closed without native crypto
+// (BigInt secrets cannot be zeroized from the JS heap).
 var seed1 = hexToBytes("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60");
-var kp1 = crypto.ed25519Keygen(seed1);
-check(bytesToHex(kp1.pk) === "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a", "ed25519 tv1 pk");
-var sig1 = crypto.ed25519Sign(new Uint8Array(0), kp1.sk);
-check(bytesToHex(sig1) === "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b", "ed25519 tv1 sig");
-check(crypto.ed25519Verify(new Uint8Array(0), sig1, kp1.pk), "ed25519 tv1 verify");
+var pk1 = hexToBytes("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a");
+var sig1 = hexToBytes("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b");
+var threwKeygen = false;
+try { crypto.ed25519Keygen(seed1); } catch (e) { threwKeygen = /requires native Ed25519/.test(e.message); }
+check(threwKeygen, "ed25519 keygen fails closed without native");
+var sk1 = new Uint8Array(64); sk1.set(seed1); sk1.set(pk1, 32);
+var threwSign = false;
+try { crypto.ed25519Sign(new Uint8Array(0), sk1); } catch (e) { threwSign = /requires native Ed25519/.test(e.message); }
+check(threwSign, "ed25519 sign fails closed without native");
+// Verify is pure-JS by design — must still work
+check(crypto.ed25519Verify(new Uint8Array(0), sig1, pk1), "ed25519 tv1 verify (pure JS)");
 
 // X25519 key exchange (public API, forced fallback)
 var kpA = crypto.x25519Keygen(hexToBytes("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a"));
