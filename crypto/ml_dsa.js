@@ -45,6 +45,30 @@ function zeroizeVec(v) {
   for (let i = 0; i < v.length; i++) zeroize(v[i]);
 }
 
+// Best-effort signing-time side-channel padding. ML-DSA signing uses rejection
+// sampling: the number of loop iterations is secret-dependent, so a signature
+// that completes quickly (few rejections) would otherwise be distinguishable by
+// wall-clock from one that took many. Clamping every signature to a fixed
+// minimum duration hides that floor. This is defense-in-depth only — it does
+// not cap signatures that run longer than the floor, and it busy-waits (and so
+// blocks the event loop) for the remainder; the rigorous fix is fully
+// constant-time rejection sampling.
+const ML_DSA_SIGN_MIN_DURATION_MS = 75;
+
+function mlDsaNowMs() {
+  if (typeof performance !== "undefined" && typeof performance.now === "function") {
+    return performance.now();
+  }
+  return Date.now();
+}
+
+function mlDsaPadSigning(startMs) {
+  const deadline = startMs + ML_DSA_SIGN_MIN_DURATION_MS;
+  while (mlDsaNowMs() < deadline) {
+    // Fixed minimum wall-clock padding so rejection-attempt counts are not directly exposed.
+  }
+}
+
 // -- ML-DSA-65 Parameters (FIPS 204 Table 1) ---------------------------------
 
 const Q = 8380417;           // Prime modulus: 2^23 - 2^13 + 1
@@ -1141,6 +1165,19 @@ function mlVerifyInternal(message, sigBytes, pkBytes) {
  * @param {Object} [opts] - Options: {deterministic: bool, rnd: Uint8Array|null}.
  * @returns {Uint8Array} Signature bytes (3,309 bytes for ML-DSA-65).
  */
+// Wraps mlSignInternal with fixed-minimum-duration padding (see
+// mlDsaPadSigning). All public signing paths route through this so the
+// secret-dependent rejection-sampling iteration count is not exposed by
+// wall-clock timing.
+function mlSignInternalPadded(message, skBytes, rnd, deterministic) {
+  const startMs = mlDsaNowMs();
+  try {
+    return mlSignInternal(message, skBytes, rnd, deterministic);
+  } finally {
+    mlDsaPadSigning(startMs);
+  }
+}
+
 function mlSign(message, sk, opts) {
   // FIPS 204 §5.2 "pure" mode (default) — prepends 0x00 || ctx_len(=0) || msg
   // before calling Sign_internal. This matches the FIPS standard and the
@@ -1165,7 +1202,7 @@ function mlSign(message, sk, opts) {
 function mlSignInternalApi(message, sk, opts) {
   message = toBytes(message);
   if (opts === undefined) opts = {};
-  return mlSignInternal(message, sk, opts.rnd || null, !!opts.deterministic);
+  return mlSignInternalPadded(message, sk, opts.rnd || null, !!opts.deterministic);
 }
 
 /**
@@ -1225,7 +1262,7 @@ function mlSignWithContext(message, sk, ctx, opts) {
     ctx,
     message
   );
-  return mlSignInternal(mPrime, sk, opts.rnd || null, !!opts.deterministic);
+  return mlSignInternalPadded(mPrime, sk, opts.rnd || null, !!opts.deterministic);
 }
 
 /**
