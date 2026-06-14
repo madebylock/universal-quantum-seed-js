@@ -179,14 +179,22 @@ if (!_timingSafeEqual) {
       const _mod = new WebAssembly.Module(_wasmBin);
       const _inst = new WebAssembly.Instance(_mod);
       const _mem = new Uint8Array(_inst.exports.m.buffer);
+      // Split the single WASM page into two equal halves so inputs of any
+      // length compare in fixed-size chunks (a-chunk at offset 0, b-chunk at
+      // offset _chunkLen). This keeps every comparison on the constant-time
+      // WASM path instead of falling back to JS for inputs larger than the page.
+      const _chunkLen = Math.floor(_mem.length / 2);
       _wasmCtEqual = function (a, b) {
-        if (a.length + b.length > _mem.length) return null;
-        _mem.set(a, 0);
-        _mem.set(b, a.length);
-        const eq = _inst.exports.e(0, a.length, a.length) === 1;
-        // Best-effort: zero sensitive data from WASM memory
-        _mem.fill(0, 0, a.length + b.length);
-        return eq;
+        let eq = 1;
+        for (let off = 0; off < a.length; off += _chunkLen) {
+          const n = Math.min(_chunkLen, a.length - off);
+          _mem.set(a.subarray(off, off + n), 0);
+          _mem.set(b.subarray(off, off + n), _chunkLen);
+          eq &= _inst.exports.e(0, _chunkLen, n);
+          // Best-effort: zero sensitive data from WASM memory
+          _mem.fill(0, 0, _chunkLen + n);
+        }
+        return eq === 1;
       };
     }
   } catch (_) {
@@ -198,8 +206,7 @@ function constantTimeEqual(a, b) {
   if (a.length !== b.length) return false;
   if (_timingSafeEqual) return _timingSafeEqual(a, b);
   if (_wasmCtEqual) {
-    const wasmResult = _wasmCtEqual(a, b);
-    if (wasmResult !== null) return wasmResult;
+    return _wasmCtEqual(a, b);
   }
   // Tier 3: Pure JS XOR-accumulate (constant-ish, JIT may optimize)
   let diff = 0;
@@ -3496,13 +3503,29 @@ function mlSignInternal(message, skBytes, rnd, deterministic) {
     zeroizeVec(s2Hat);
     zeroizeVec(t0);
     zeroizeVec(t0Hat);
+    zeroize(rho);
     zeroize(Kval);
+    zeroize(tr);
+    zeroize(mu);
     zeroize(rhoPrimePrime);
     zeroize(rndBytes);
 
     return sig;
   }
 
+  // Best-effort cleanup of secret intermediates on the (rare) exhaustion path too.
+  zeroizeVec(s1);
+  zeroizeVec(s2);
+  zeroizeVec(s1Hat);
+  zeroizeVec(s2Hat);
+  zeroizeVec(t0);
+  zeroizeVec(t0Hat);
+  zeroize(rho);
+  zeroize(Kval);
+  zeroize(tr);
+  zeroize(mu);
+  zeroize(rhoPrimePrime);
+  zeroize(rndBytes);
   throw new Error("ML-DSA signing failed after " + maxAttempts + " rejection attempts");
 }
 
@@ -3745,15 +3768,137 @@ function mlVerifyWithContext(message, sig, pk, ctx) {
 }
 
 /**
- * Async wrapper for mlSign — yields to the event loop before computation
- * so browser UIs don't freeze. Uses the same algorithm as the sync version.
+ * Sign with a caller-provided mutable key buffer and wipe that buffer after use.
+ * Produces the same signature as mlSign(). Pass a defensive copy when the
+ * original key must remain available to the caller.
+ */
+function mlSignAndZeroizeSk(message, sk, opts) {
+  try {
+    return mlSign(message, sk, opts);
+  } finally {
+    zeroize(sk);
+  }
+}
+
+function _getMlDsaBundleURL() {
+  if (typeof globalThis !== "undefined" && typeof globalThis.UQS_CRYPTO_BUNDLE_URL === "string") {
+    return globalThis.UQS_CRYPTO_BUNDLE_URL;
+  }
+  if (typeof document !== "undefined") {
+    const current = document.currentScript;
+    if (current && current.src) return current.src;
+    const scripts = document.getElementsByTagName("script");
+    for (let i = scripts.length - 1; i >= 0; i--) {
+      const src = scripts[i] && scripts[i].src;
+      if (src && (src.indexOf("uqs") !== -1 || src.indexOf("crypto") !== -1)) return src;
+    }
+  }
+  return null;
+}
+
+function _createMlDsaWorkerURL() {
+  const bundleURL = _getMlDsaBundleURL();
+  if (!bundleURL) return null;
+  const src = [
+    '"use strict";',
+    'self.onmessage = function(e) {',
+    '  var sk = null;',
+    '  var rnd = null;',
+    '  try {',
+    '    var msg = new Uint8Array(e.data.message);',
+    '    sk = new Uint8Array(e.data.sk);',
+    '    var opts = e.data.opts || {};',
+    '    if (e.data.rnd) { rnd = new Uint8Array(e.data.rnd); opts.rnd = rnd; }',
+    '    importScripts(' + JSON.stringify(bundleURL) + ');',
+    '    var crypto = self.UQS;',
+    '    var sig = crypto.mlSignAndZeroizeSk(msg, sk, opts);',
+    '    self.postMessage({ ok: true, sig: sig.buffer }, [sig.buffer]);',
+    '  } catch (err) {',
+    '    if (sk) sk.fill(0);',
+    '    if (rnd) rnd.fill(0);',
+    '    self.postMessage({ ok: false, error: err && err.message ? err.message : String(err) });',
+    '  }',
+    '};'
+  ].join("\n");
+  const blob = new Blob([src], { type: "application/javascript" });
+  return URL.createObjectURL(blob);
+}
+
+/**
+ * Async wrapper for mlSign. In browsers with Worker/Blob support, ML-DSA signing
+ * runs off the UI thread and the worker-owned secret-key copy is wiped after use.
+ * In pure-JS / non-browser environments (e.g. Node.js, or workers without nested
+ * Worker support) it falls back to a main-thread sign scheduled on a future tick,
+ * so the API still resolves everywhere without requiring Web Workers.
  */
 function mlSignAsync(message, sk, opts) {
   return new Promise(function (resolve, reject) {
-    setTimeout(function () {
-      try { resolve(mlSign(message, sk, opts)); }
-      catch (e) { reject(e); }
-    }, 0);
+    function mainThreadFallback() {
+      setTimeout(function () {
+        try { resolve(mlSign(message, sk, opts)); }
+        catch (e) { reject(e); }
+      }, 0);
+    }
+
+    if (typeof Worker === "undefined" || typeof Blob === "undefined" ||
+        typeof URL === "undefined" || !URL.createObjectURL) {
+      mainThreadFallback();
+      return;
+    }
+
+    let url = null;
+    let worker = null;
+    let skCopy = null;
+    let rndCopy = null;
+    try {
+      const msgCopy = new Uint8Array(toBytes(message));
+      skCopy = new Uint8Array(sk);
+      const optsCopy = Object.assign({}, opts || {});
+      if (optsCopy.rnd != null) {
+        rndCopy = new Uint8Array(optsCopy.rnd);
+        delete optsCopy.rnd;
+      }
+      const transfers = [msgCopy.buffer, skCopy.buffer];
+      if (rndCopy) transfers.push(rndCopy.buffer);
+
+      url = _createMlDsaWorkerURL();
+      if (!url) {
+        // Bundle URL not discoverable (e.g. bundled/inlined) — fall back.
+        zeroize(skCopy);
+        if (rndCopy) zeroize(rndCopy);
+        mainThreadFallback();
+        return;
+      }
+
+      function cleanup() {
+        if (worker) worker.terminate();
+        if (url) URL.revokeObjectURL(url);
+      }
+
+      worker = new Worker(url);
+      worker.onmessage = function (e) {
+        cleanup();
+        if (e.data && e.data.ok) {
+          resolve(new Uint8Array(e.data.sig));
+        } else {
+          reject(new Error(e.data && e.data.error ? e.data.error : "ML-DSA worker signing failed"));
+        }
+      };
+      worker.onerror = function (err) {
+        cleanup();
+        reject(err || new Error("ML-DSA worker signing failed"));
+      };
+      worker.postMessage(
+        { message: msgCopy.buffer, sk: skCopy.buffer, opts: optsCopy, rnd: rndCopy ? rndCopy.buffer : null },
+        transfers
+      );
+    } catch (e) {
+      if (worker) worker.terminate();
+      if (url) URL.revokeObjectURL(url);
+      if (skCopy) zeroize(skCopy);
+      if (rndCopy) zeroize(rndCopy);
+      reject(e);
+    }
   });
 }
 
@@ -3777,6 +3922,7 @@ module.exports = {
   mlVerifyWithContext,
   mlSignInternal: mlSignInternalApi,
   mlVerifyInternal: mlVerifyInternalApi,
+  mlSignAndZeroizeSk,
   mlSignAsync,
   mlVerifyAsync,
   // Expose sizes for callers
@@ -4278,6 +4424,24 @@ function mlKemEncaps(ek, randomness) {
   return { ct, ss: new Uint8Array(Kss) };
 }
 
+// Deterministic stand-in for m' when K-PKE decryption itself throws on
+// malformed inputs. Keeps decapsulation total (FIPS 203 implicit rejection):
+// the value is unpredictable to an attacker and is discarded by the
+// constant-time mask below, but lets the re-encryption path run uniformly
+// instead of leaking a decrypt failure via an exception.
+function mlKemDecapsFallbackMPrime(ct) {
+  const domain = new Uint8Array([
+    0x4d,0x4c,0x2d,0x4b,0x45,0x4d,0x2d,0x37,
+    0x36,0x38,0x2d,0x66,0x61,0x6c,0x6c,0x62,
+    0x61,0x63,0x6b,0x2d,0x6d,0x70,0x72,0x69,
+    0x6d,0x65,0x2d,0x76,0x31,0x00,0x00,0x00
+  ]);
+  const input = new Uint8Array(domain.length + ct.length);
+  input.set(domain);
+  input.set(ct, domain.length);
+  return shake256(input, 32);
+}
+
 function mlKemDecaps(dk, ct) {
   if (!(dk instanceof Uint8Array)) throw new Error("dk must be a Uint8Array");
   if (!(ct instanceof Uint8Array)) throw new Error("ct must be a Uint8Array");
@@ -4292,7 +4456,14 @@ function mlKemDecaps(dk, ct) {
   );
   const z = dk.subarray(K_PKE_DK_SIZE + ML_KEM_EK_SIZE + 32);
 
-  const mPrime = kPkeDecrypt(dkPke, ct);
+  let mPrime;
+  let decryptOk = 1;
+  try {
+    mPrime = kPkeDecrypt(dkPke, ct);
+  } catch (_) {
+    decryptOk = 0;
+    mPrime = mlKemDecapsFallbackMPrime(ct);
+  }
 
   const gInput = new Uint8Array(64);
   gInput.set(mPrime);
@@ -4307,11 +4478,22 @@ function mlKemDecaps(dk, ct) {
   kBarInput.set(ct, z.length);
   const Kbar = shake256(kBarInput, 32);
 
-  const ctPrime = kPkeEncrypt(ekPke, mPrime, rPrime);
+  let ctPrime;
+  let reencryptionOk = 1;
+  try {
+    ctPrime = kPkeEncrypt(ekPke, mPrime, rPrime);
+  } catch (_) {
+    reencryptionOk = 0;
+    ctPrime = new Uint8Array(ct.length);
+  }
 
   // Constant-time selection: avoid branch on secret comparison result.
-  // Derive mask arithmetically: -1 (0xffffffff) if equal, 0 if not.
-  const mask = (-(constantTimeEqual(ct, ctPrime) | 0)) & 0xff;
+  // Derive mask arithmetically: -1 (0xffffffff) if equal, 0 if not. A throw in
+  // either K-PKE half forces the implicit-rejection branch (Kbar) rather than
+  // surfacing an exception that would distinguish malformed ciphertexts.
+  const implicitRejectionOk = decryptOk & reencryptionOk &
+    (constantTimeEqual(ct, ctPrime) ? 1 : 0);
+  const mask = (-implicitRejectionOk) & 0xff;
   const result = new Uint8Array(32);
   for (let i = 0; i < 32; i++) {
     result[i] = (Kprime[i] & mask) | (Kbar[i] & (~mask & 0xff));
@@ -5543,7 +5725,7 @@ _modules["./crypto/hybrid_dsa"] = function(module, exports, require) {
 // Best-effort constant-time. For hardware side-channel resistance, use C/Rust.
 
 const { ed25519Keygen, ed25519Sign, ed25519Verify } = require("./ed25519");
-const { mlKeygen, mlSignWithContext, mlVerifyWithContext } = require("./ml_dsa");
+const { mlKeygen, mlSignWithContext, mlVerifyWithContext, mlSignAndZeroizeSk } = require("./ml_dsa");
 const { toBytes, zeroize } = require("./utils");
 
 // Component sizes
@@ -5673,17 +5855,24 @@ function hybridDsaSign(message, sk, ctx, version = HYBRID_DSA_VERSION) {
   version = normalizeHybridDsaVersion(version);
 
   const edSk = sk.subarray(0, _ED25519_SK);
-  const mlSk = sk.subarray(_ED25519_SK);
+  // Defensive copy so the ML-DSA signer can wipe its working key without
+  // touching the caller-owned hybrid secret-key buffer.
+  const mlSk = new Uint8Array(sk.subarray(_ED25519_SK));
 
   // Ed25519: signs domain-prefixed message (stripping resistance)
   const edMsg = _ed25519Message(message, ctx, version);
   const edSig = ed25519Sign(edMsg, edSk);
   zeroize(edMsg);
 
-  // ML-DSA: signs domain-prefixed message with empty FIPS context so
-  // pqcrypto can provide the production signing backend.
+  // ML-DSA: signs domain-prefixed message with empty FIPS context (mlSign
+  // semantics) so pqcrypto can provide the production signing backend.
   const mlMsg = _mlDsaMessage(message, ctx, version);
-  const mlSig = mlSignWithContext(mlMsg, mlSk, new Uint8Array(0));
+  let mlSig;
+  try {
+    mlSig = mlSignAndZeroizeSk(mlMsg, mlSk);
+  } finally {
+    zeroize(mlMsg);
+  }
 
   const sig = new Uint8Array(HYBRID_DSA_SIG_SIZE);
   sig.set(edSig);
@@ -6446,7 +6635,7 @@ _modules["./crypto"] = function(module, exports, require) {
 
 const { sha3_256, sha3_512, shake128, shake256, shake128Xof, shake256Xof } = require("./sha3");
 const { sha256, sha512, hmacSha256, hmacSha512, hkdfExpand, hkdfExpandSha256, hkdfExtractSha256, pbkdf2Sha512, pbkdf2Sha512Async } = require("./sha2");
-const { mlKeygen, mlSign, mlVerify, mlSignWithContext, mlVerifyWithContext, mlSignInternal, mlVerifyInternal, mlSignAsync, mlVerifyAsync } = require("./ml_dsa");
+const { mlKeygen, mlSign, mlVerify, mlSignWithContext, mlVerifyWithContext, mlSignInternal, mlVerifyInternal, mlSignAndZeroizeSk, mlSignAsync, mlVerifyAsync } = require("./ml_dsa");
 const { slhKeygen, slhSign, slhVerify, slhSignWithContext, slhVerifyWithContext, slhSignInternal, slhVerifyInternal, slhSignAsync, slhVerifyAsync } = require("./slh_dsa");
 const {
   ML_KEM_CT_SIZE,
@@ -6493,7 +6682,7 @@ module.exports = {
   // mlSign/mlVerify default to FIPS pure mode (matches Python ml_sign).
   // mlSignInternal/mlVerifyInternal expose Sign_internal for ACVP/KAT use.
   mlKeygen, mlSign, mlVerify, mlSignWithContext, mlVerifyWithContext,
-  mlSignInternal, mlVerifyInternal, mlSignAsync, mlVerifyAsync,
+  mlSignInternal, mlVerifyInternal, mlSignAndZeroizeSk, mlSignAsync, mlVerifyAsync,
 
   // SLH-DSA-SHAKE-128s (FIPS 205) — Post-quantum hash-based signature
   // slhSign/slhVerify default to FIPS pure mode (matches Python slh_sign).
@@ -7065,6 +7254,8 @@ function getFingerprint(seed, passphrase = "", { bits = 32 } = {}) {
 
 function getEntropyBits(wordCount, passphrase = "") {
   const seedBits = (wordCount - 2) * 8;
+  // Normalize so the estimate reflects the same NFKC form the KDF consumes.
+  passphrase = String(passphrase).normalize("NFKC");
   if (!passphrase) return seedBits;
 
   let hasLower = false, hasUpper = false, hasDigit = false, hasSymbol = false, hasUnicode = false;
@@ -7213,6 +7404,7 @@ module.exports = {
   mlVerify: crypto.mlVerify,
   mlSignWithContext: crypto.mlSignWithContext,
   mlVerifyWithContext: crypto.mlVerifyWithContext,
+  mlSignAndZeroizeSk: crypto.mlSignAndZeroizeSk,
   mlSignAsync: crypto.mlSignAsync,
   mlVerifyAsync: crypto.mlVerifyAsync,
 

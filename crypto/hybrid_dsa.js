@@ -25,7 +25,7 @@
 // Best-effort constant-time. For hardware side-channel resistance, use C/Rust.
 
 const { ed25519Keygen, ed25519Sign, ed25519Verify } = require("./ed25519");
-const { mlKeygen, mlSignWithContext, mlVerifyWithContext } = require("./ml_dsa");
+const { mlKeygen, mlSignWithContext, mlVerifyWithContext, mlSignAndZeroizeSk } = require("./ml_dsa");
 const { toBytes, zeroize } = require("./utils");
 
 // Component sizes
@@ -155,17 +155,24 @@ function hybridDsaSign(message, sk, ctx, version = HYBRID_DSA_VERSION) {
   version = normalizeHybridDsaVersion(version);
 
   const edSk = sk.subarray(0, _ED25519_SK);
-  const mlSk = sk.subarray(_ED25519_SK);
+  // Defensive copy so the ML-DSA signer can wipe its working key without
+  // touching the caller-owned hybrid secret-key buffer.
+  const mlSk = new Uint8Array(sk.subarray(_ED25519_SK));
 
   // Ed25519: signs domain-prefixed message (stripping resistance)
   const edMsg = _ed25519Message(message, ctx, version);
   const edSig = ed25519Sign(edMsg, edSk);
   zeroize(edMsg);
 
-  // ML-DSA: signs domain-prefixed message with empty FIPS context so
-  // pqcrypto can provide the production signing backend.
+  // ML-DSA: signs domain-prefixed message with empty FIPS context (mlSign
+  // semantics) so pqcrypto can provide the production signing backend.
   const mlMsg = _mlDsaMessage(message, ctx, version);
-  const mlSig = mlSignWithContext(mlMsg, mlSk, new Uint8Array(0));
+  let mlSig;
+  try {
+    mlSig = mlSignAndZeroizeSk(mlMsg, mlSk);
+  } finally {
+    zeroize(mlMsg);
+  }
 
   const sig = new Uint8Array(HYBRID_DSA_SIG_SIZE);
   sig.set(edSig);

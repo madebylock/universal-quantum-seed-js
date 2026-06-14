@@ -4,7 +4,7 @@
 
 const { sha3_256, sha3_512, shake128, shake256, shake128Xof, shake256Xof } = require("./sha3");
 const { sha256, sha512, hmacSha256, hmacSha512, hkdfExpand, hkdfExpandSha256, hkdfExtractSha256, pbkdf2Sha512, pbkdf2Sha512Async } = require("./sha2");
-const { mlKeygen, mlSign, mlVerify, mlSignWithContext, mlVerifyWithContext, mlSignInternal, mlVerifyInternal, mlSignAsync, mlVerifyAsync } = require("./ml_dsa");
+const { mlKeygen, mlSign, mlVerify, mlSignWithContext, mlVerifyWithContext, mlSignInternal, mlVerifyInternal, mlSignAndZeroizeSk, mlSignAsync, mlVerifyAsync } = require("./ml_dsa");
 const { slhKeygen, slhSign, slhVerify, slhSignWithContext, slhVerifyWithContext, slhSignInternal, slhVerifyInternal, slhSignAsync, slhVerifyAsync } = require("./slh_dsa");
 const {
   ML_KEM_CT_SIZE,
@@ -51,7 +51,7 @@ module.exports = {
   // mlSign/mlVerify default to FIPS pure mode (matches Python ml_sign).
   // mlSignInternal/mlVerifyInternal expose Sign_internal for ACVP/KAT use.
   mlKeygen, mlSign, mlVerify, mlSignWithContext, mlVerifyWithContext,
-  mlSignInternal, mlVerifyInternal, mlSignAsync, mlVerifyAsync,
+  mlSignInternal, mlVerifyInternal, mlSignAndZeroizeSk, mlSignAsync, mlVerifyAsync,
 
   // SLH-DSA-SHAKE-128s (FIPS 205) — Post-quantum hash-based signature
   // slhSign/slhVerify default to FIPS pure mode (matches Python slh_sign).

@@ -903,6 +903,8 @@ function getFingerprint(seed, passphrase = "", { bits = 32 } = {}) {
 
 function getEntropyBits(wordCount, passphrase = "") {
   const seedBits = (wordCount - 2) * 8;
+  // Normalize so the estimate reflects the same NFKC form the KDF consumes.
+  passphrase = String(passphrase).normalize("NFKC");
   if (!passphrase) return seedBits;
 
   let hasLower = false, hasUpper = false, hasDigit = false, hasSymbol = false, hasUnicode = false;

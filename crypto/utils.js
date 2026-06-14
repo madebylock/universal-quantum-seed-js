@@ -124,14 +124,22 @@ if (!_timingSafeEqual) {
       const _mod = new WebAssembly.Module(_wasmBin);
       const _inst = new WebAssembly.Instance(_mod);
       const _mem = new Uint8Array(_inst.exports.m.buffer);
+      // Split the single WASM page into two equal halves so inputs of any
+      // length compare in fixed-size chunks (a-chunk at offset 0, b-chunk at
+      // offset _chunkLen). This keeps every comparison on the constant-time
+      // WASM path instead of falling back to JS for inputs larger than the page.
+      const _chunkLen = Math.floor(_mem.length / 2);
       _wasmCtEqual = function (a, b) {
-        if (a.length + b.length > _mem.length) return null;
-        _mem.set(a, 0);
-        _mem.set(b, a.length);
-        const eq = _inst.exports.e(0, a.length, a.length) === 1;
-        // Best-effort: zero sensitive data from WASM memory
-        _mem.fill(0, 0, a.length + b.length);
-        return eq;
+        let eq = 1;
+        for (let off = 0; off < a.length; off += _chunkLen) {
+          const n = Math.min(_chunkLen, a.length - off);
+          _mem.set(a.subarray(off, off + n), 0);
+          _mem.set(b.subarray(off, off + n), _chunkLen);
+          eq &= _inst.exports.e(0, _chunkLen, n);
+          // Best-effort: zero sensitive data from WASM memory
+          _mem.fill(0, 0, _chunkLen + n);
+        }
+        return eq === 1;
       };
     }
   } catch (_) {
@@ -143,8 +151,7 @@ function constantTimeEqual(a, b) {
   if (a.length !== b.length) return false;
   if (_timingSafeEqual) return _timingSafeEqual(a, b);
   if (_wasmCtEqual) {
-    const wasmResult = _wasmCtEqual(a, b);
-    if (wasmResult !== null) return wasmResult;
+    return _wasmCtEqual(a, b);
   }
   // Tier 3: Pure JS XOR-accumulate (constant-ish, JIT may optimize)
   let diff = 0;

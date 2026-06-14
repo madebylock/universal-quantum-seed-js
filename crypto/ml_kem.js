@@ -486,6 +486,24 @@ function mlKemEncaps(ek, randomness) {
   return { ct, ss: new Uint8Array(Kss) };
 }
 
+// Deterministic stand-in for m' when K-PKE decryption itself throws on
+// malformed inputs. Keeps decapsulation total (FIPS 203 implicit rejection):
+// the value is unpredictable to an attacker and is discarded by the
+// constant-time mask below, but lets the re-encryption path run uniformly
+// instead of leaking a decrypt failure via an exception.
+function mlKemDecapsFallbackMPrime(ct) {
+  const domain = new Uint8Array([
+    0x4d,0x4c,0x2d,0x4b,0x45,0x4d,0x2d,0x37,
+    0x36,0x38,0x2d,0x66,0x61,0x6c,0x6c,0x62,
+    0x61,0x63,0x6b,0x2d,0x6d,0x70,0x72,0x69,
+    0x6d,0x65,0x2d,0x76,0x31,0x00,0x00,0x00
+  ]);
+  const input = new Uint8Array(domain.length + ct.length);
+  input.set(domain);
+  input.set(ct, domain.length);
+  return shake256(input, 32);
+}
+
 function mlKemDecaps(dk, ct) {
   if (!(dk instanceof Uint8Array)) throw new Error("dk must be a Uint8Array");
   if (!(ct instanceof Uint8Array)) throw new Error("ct must be a Uint8Array");
@@ -500,7 +518,14 @@ function mlKemDecaps(dk, ct) {
   );
   const z = dk.subarray(K_PKE_DK_SIZE + ML_KEM_EK_SIZE + 32);
 
-  const mPrime = kPkeDecrypt(dkPke, ct);
+  let mPrime;
+  let decryptOk = 1;
+  try {
+    mPrime = kPkeDecrypt(dkPke, ct);
+  } catch (_) {
+    decryptOk = 0;
+    mPrime = mlKemDecapsFallbackMPrime(ct);
+  }
 
   const gInput = new Uint8Array(64);
   gInput.set(mPrime);
@@ -515,11 +540,22 @@ function mlKemDecaps(dk, ct) {
   kBarInput.set(ct, z.length);
   const Kbar = shake256(kBarInput, 32);
 
-  const ctPrime = kPkeEncrypt(ekPke, mPrime, rPrime);
+  let ctPrime;
+  let reencryptionOk = 1;
+  try {
+    ctPrime = kPkeEncrypt(ekPke, mPrime, rPrime);
+  } catch (_) {
+    reencryptionOk = 0;
+    ctPrime = new Uint8Array(ct.length);
+  }
 
   // Constant-time selection: avoid branch on secret comparison result.
-  // Derive mask arithmetically: -1 (0xffffffff) if equal, 0 if not.
-  const mask = (-(constantTimeEqual(ct, ctPrime) | 0)) & 0xff;
+  // Derive mask arithmetically: -1 (0xffffffff) if equal, 0 if not. A throw in
+  // either K-PKE half forces the implicit-rejection branch (Kbar) rather than
+  // surfacing an exception that would distinguish malformed ciphertexts.
+  const implicitRejectionOk = decryptOk & reencryptionOk &
+    (constantTimeEqual(ct, ctPrime) ? 1 : 0);
+  const mask = (-implicitRejectionOk) & 0xff;
   const result = new Uint8Array(32);
   for (let i = 0; i < 32; i++) {
     result[i] = (Kprime[i] & mask) | (Kbar[i] & (~mask & 0xff));

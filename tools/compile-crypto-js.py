@@ -151,6 +151,7 @@ module.exports = {
   mlVerify: crypto.mlVerify,
   mlSignWithContext: crypto.mlSignWithContext,
   mlVerifyWithContext: crypto.mlVerifyWithContext,
+  mlSignAndZeroizeSk: crypto.mlSignAndZeroizeSk,
   mlSignAsync: crypto.mlSignAsync,
   mlVerifyAsync: crypto.mlVerifyAsync,
 

@@ -1044,13 +1044,29 @@ function mlSignInternal(message, skBytes, rnd, deterministic) {
     zeroizeVec(s2Hat);
     zeroizeVec(t0);
     zeroizeVec(t0Hat);
+    zeroize(rho);
     zeroize(Kval);
+    zeroize(tr);
+    zeroize(mu);
     zeroize(rhoPrimePrime);
     zeroize(rndBytes);
 
     return sig;
   }
 
+  // Best-effort cleanup of secret intermediates on the (rare) exhaustion path too.
+  zeroizeVec(s1);
+  zeroizeVec(s2);
+  zeroizeVec(s1Hat);
+  zeroizeVec(s2Hat);
+  zeroizeVec(t0);
+  zeroizeVec(t0Hat);
+  zeroize(rho);
+  zeroize(Kval);
+  zeroize(tr);
+  zeroize(mu);
+  zeroize(rhoPrimePrime);
+  zeroize(rndBytes);
   throw new Error("ML-DSA signing failed after " + maxAttempts + " rejection attempts");
 }
 
@@ -1293,15 +1309,137 @@ function mlVerifyWithContext(message, sig, pk, ctx) {
 }
 
 /**
- * Async wrapper for mlSign — yields to the event loop before computation
- * so browser UIs don't freeze. Uses the same algorithm as the sync version.
+ * Sign with a caller-provided mutable key buffer and wipe that buffer after use.
+ * Produces the same signature as mlSign(). Pass a defensive copy when the
+ * original key must remain available to the caller.
+ */
+function mlSignAndZeroizeSk(message, sk, opts) {
+  try {
+    return mlSign(message, sk, opts);
+  } finally {
+    zeroize(sk);
+  }
+}
+
+function _getMlDsaBundleURL() {
+  if (typeof globalThis !== "undefined" && typeof globalThis.UQS_CRYPTO_BUNDLE_URL === "string") {
+    return globalThis.UQS_CRYPTO_BUNDLE_URL;
+  }
+  if (typeof document !== "undefined") {
+    const current = document.currentScript;
+    if (current && current.src) return current.src;
+    const scripts = document.getElementsByTagName("script");
+    for (let i = scripts.length - 1; i >= 0; i--) {
+      const src = scripts[i] && scripts[i].src;
+      if (src && (src.indexOf("uqs") !== -1 || src.indexOf("crypto") !== -1)) return src;
+    }
+  }
+  return null;
+}
+
+function _createMlDsaWorkerURL() {
+  const bundleURL = _getMlDsaBundleURL();
+  if (!bundleURL) return null;
+  const src = [
+    '"use strict";',
+    'self.onmessage = function(e) {',
+    '  var sk = null;',
+    '  var rnd = null;',
+    '  try {',
+    '    var msg = new Uint8Array(e.data.message);',
+    '    sk = new Uint8Array(e.data.sk);',
+    '    var opts = e.data.opts || {};',
+    '    if (e.data.rnd) { rnd = new Uint8Array(e.data.rnd); opts.rnd = rnd; }',
+    '    importScripts(' + JSON.stringify(bundleURL) + ');',
+    '    var crypto = self.UQS;',
+    '    var sig = crypto.mlSignAndZeroizeSk(msg, sk, opts);',
+    '    self.postMessage({ ok: true, sig: sig.buffer }, [sig.buffer]);',
+    '  } catch (err) {',
+    '    if (sk) sk.fill(0);',
+    '    if (rnd) rnd.fill(0);',
+    '    self.postMessage({ ok: false, error: err && err.message ? err.message : String(err) });',
+    '  }',
+    '};'
+  ].join("\n");
+  const blob = new Blob([src], { type: "application/javascript" });
+  return URL.createObjectURL(blob);
+}
+
+/**
+ * Async wrapper for mlSign. In browsers with Worker/Blob support, ML-DSA signing
+ * runs off the UI thread and the worker-owned secret-key copy is wiped after use.
+ * In pure-JS / non-browser environments (e.g. Node.js, or workers without nested
+ * Worker support) it falls back to a main-thread sign scheduled on a future tick,
+ * so the API still resolves everywhere without requiring Web Workers.
  */
 function mlSignAsync(message, sk, opts) {
   return new Promise(function (resolve, reject) {
-    setTimeout(function () {
-      try { resolve(mlSign(message, sk, opts)); }
-      catch (e) { reject(e); }
-    }, 0);
+    function mainThreadFallback() {
+      setTimeout(function () {
+        try { resolve(mlSign(message, sk, opts)); }
+        catch (e) { reject(e); }
+      }, 0);
+    }
+
+    if (typeof Worker === "undefined" || typeof Blob === "undefined" ||
+        typeof URL === "undefined" || !URL.createObjectURL) {
+      mainThreadFallback();
+      return;
+    }
+
+    let url = null;
+    let worker = null;
+    let skCopy = null;
+    let rndCopy = null;
+    try {
+      const msgCopy = new Uint8Array(toBytes(message));
+      skCopy = new Uint8Array(sk);
+      const optsCopy = Object.assign({}, opts || {});
+      if (optsCopy.rnd != null) {
+        rndCopy = new Uint8Array(optsCopy.rnd);
+        delete optsCopy.rnd;
+      }
+      const transfers = [msgCopy.buffer, skCopy.buffer];
+      if (rndCopy) transfers.push(rndCopy.buffer);
+
+      url = _createMlDsaWorkerURL();
+      if (!url) {
+        // Bundle URL not discoverable (e.g. bundled/inlined) — fall back.
+        zeroize(skCopy);
+        if (rndCopy) zeroize(rndCopy);
+        mainThreadFallback();
+        return;
+      }
+
+      function cleanup() {
+        if (worker) worker.terminate();
+        if (url) URL.revokeObjectURL(url);
+      }
+
+      worker = new Worker(url);
+      worker.onmessage = function (e) {
+        cleanup();
+        if (e.data && e.data.ok) {
+          resolve(new Uint8Array(e.data.sig));
+        } else {
+          reject(new Error(e.data && e.data.error ? e.data.error : "ML-DSA worker signing failed"));
+        }
+      };
+      worker.onerror = function (err) {
+        cleanup();
+        reject(err || new Error("ML-DSA worker signing failed"));
+      };
+      worker.postMessage(
+        { message: msgCopy.buffer, sk: skCopy.buffer, opts: optsCopy, rnd: rndCopy ? rndCopy.buffer : null },
+        transfers
+      );
+    } catch (e) {
+      if (worker) worker.terminate();
+      if (url) URL.revokeObjectURL(url);
+      if (skCopy) zeroize(skCopy);
+      if (rndCopy) zeroize(rndCopy);
+      reject(e);
+    }
   });
 }
 
@@ -1325,6 +1463,7 @@ module.exports = {
   mlVerifyWithContext,
   mlSignInternal: mlSignInternalApi,
   mlVerifyInternal: mlVerifyInternalApi,
+  mlSignAndZeroizeSk,
   mlSignAsync,
   mlVerifyAsync,
   // Expose sizes for callers
