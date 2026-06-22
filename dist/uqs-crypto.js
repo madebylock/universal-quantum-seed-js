@@ -176,6 +176,13 @@ if (!_timingSafeEqual) {
         0x20,0x03, 0x45, 0x0b
       ]);
       /* eslint-enable */
+      // Do NOT append a DevTools source-map custom section to this module.
+      // For an inline (URL-less) module a relative map URL resolves against
+      // the synthetic wasm://wasm/ base, not the document origin, so DevTools
+      // fetches wasm://wasm/<url> — which a strict connect-src CSP ('self'
+      // only, as the wallet serves) can never allow, emitting a blocked-
+      // connection console warning on every DevTools open with no backing map
+      // file. Keep this module section-free (it stays exactly 93 bytes).
       const _mod = new WebAssembly.Module(_wasmBin);
       const _inst = new WebAssembly.Instance(_mod);
       const _mem = new Uint8Array(_inst.exports.m.buffer);
