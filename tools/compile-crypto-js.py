@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2026 Lock.com — MIT License
+# Copyright (c) 2026 Lock.com — PolyForm Shield License 1.0.0
 
 """
 Build a crypto-only browser bundle (no wordlists).
@@ -334,7 +334,7 @@ def strip_seed():
 IIFE_HEADER = """\
 // Universal Quantum Seed v{version} — Crypto-Only Bundle
 // https://github.com/madebylock/universal-quantum-seed-js
-// MIT License — (c) 2026 Lock.com
+// Copyright (c) 2026 Lock.com — PolyForm Shield License 1.0.0
 //
 // Crypto-only build: all cryptographic primitives + key derivation.
 // No wordlists, no word resolution, no language data (~75% smaller).

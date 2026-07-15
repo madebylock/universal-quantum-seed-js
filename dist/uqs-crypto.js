@@ -1,6 +1,6 @@
 // Universal Quantum Seed v1.0 — Crypto-Only Bundle
 // https://github.com/madebylock/universal-quantum-seed-js
-// MIT License — (c) 2026 Lock.com
+// Copyright (c) 2026 Lock.com — PolyForm Shield License 1.0.0
 //
 // Crypto-only build: all cryptographic primitives + key derivation.
 // No wordlists, no word resolution, no language data (~75% smaller).
@@ -53,7 +53,7 @@ var _dirs = {};
 // ── crypto/utils.js ──
 _dirs["./crypto/utils"] = "./crypto";
 _modules["./crypto/utils"] = function(module, exports, require) {
-// Copyright (c) 2026 Lock.com — MIT License
+// Copyright (c) 2026 Lock.com — PolyForm Shield License 1.0.0
 
 "use strict";
 
@@ -237,7 +237,7 @@ module.exports = { toBytes, concatBytes, randomBytes, zeroize, constantTimeEqual
 // ── crypto/field25519.js ──
 _dirs["./crypto/field25519"] = "./crypto";
 _modules["./crypto/field25519"] = function(module, exports, require) {
-// Copyright (c) 2026 Lock.com — MIT License
+// Copyright (c) 2026 Lock.com — PolyForm Shield License 1.0.0
 
 "use strict";
 
@@ -564,7 +564,7 @@ module.exports = {
 // ── crypto/sha2.js ──
 _dirs["./crypto/sha2"] = "./crypto";
 _modules["./crypto/sha2"] = function(module, exports, require) {
-// Copyright (c) 2026 Lock.com — MIT License
+// Copyright (c) 2026 Lock.com — PolyForm Shield License 1.0.0
 
 "use strict";
 
@@ -994,7 +994,7 @@ module.exports = {
 // ── crypto/sha3.js ──
 _dirs["./crypto/sha3"] = "./crypto";
 _modules["./crypto/sha3"] = function(module, exports, require) {
-// Copyright (c) 2026 Lock.com — MIT License
+// Copyright (c) 2026 Lock.com — PolyForm Shield License 1.0.0
 
 "use strict";
 
@@ -1365,7 +1365,7 @@ module.exports = {
 // ── crypto/argon2.js ──
 _dirs["./crypto/argon2"] = "./crypto";
 _modules["./crypto/argon2"] = function(module, exports, require) {
-// Copyright (c) 2026 Lock.com — MIT License
+// Copyright (c) 2026 Lock.com — PolyForm Shield License 1.0.0
 
 "use strict";
 
@@ -1825,7 +1825,7 @@ function argon2idAsync(password, salt, timeCost, memoryCost, parallelism, hashLe
       }
     });
   }
-  return Promise.reject(new Error("argon2idAsync requires Web Worker; refusing synchronous main-thread fallback"));
+  return Promise.reject(new Error("Web Worker unavailable for argon2idAsync; refusing synchronous main-thread fallback"));
 }
 
 module.exports = { argon2id, argon2idAsync, blake2b };
@@ -1835,7 +1835,7 @@ module.exports = { argon2id, argon2idAsync, blake2b };
 // ── crypto/ed25519.js ──
 _dirs["./crypto/ed25519"] = "./crypto";
 _modules["./crypto/ed25519"] = function(module, exports, require) {
-// Copyright (c) 2026 Lock.com — MIT License
+// Copyright (c) 2026 Lock.com — PolyForm Shield License 1.0.0
 
 "use strict";
 
@@ -2242,7 +2242,7 @@ module.exports = {
 // ── crypto/x25519.js ──
 _dirs["./crypto/x25519"] = "./crypto";
 _modules["./crypto/x25519"] = function(module, exports, require) {
-// Copyright (c) 2026 Lock.com — MIT License
+// Copyright (c) 2026 Lock.com — PolyForm Shield License 1.0.0
 
 "use strict";
 
@@ -2464,7 +2464,7 @@ module.exports = { x25519Keygen, x25519, x25519NoCheck, x25519Raw, X25519_SK_SIZ
 // ── crypto/ml_dsa.js ──
 _dirs["./crypto/ml_dsa"] = "./crypto";
 _modules["./crypto/ml_dsa"] = function(module, exports, require) {
-// Copyright (c) 2026 Lock.com — MIT License
+// Copyright (c) 2026 Lock.com — PolyForm Shield License 1.0.0
 
 "use strict";
 
@@ -3360,6 +3360,7 @@ function mlKeygen(seed) {
  * @param {Uint8Array|null} rnd - Explicit 32-byte randomness (overrides modes).
  * @param {boolean} deterministic - If true and rnd is null, uses 0^32.
  * @returns {Uint8Array} Signature bytes (3,309 bytes).
+ * This does not zeroize the caller-owned skBytes buffer.
  */
 function mlSignInternal(message, skBytes, rnd, deterministic) {
   if (skBytes.length !== SK_SIZE) {
@@ -3646,6 +3647,7 @@ function mlVerifyInternal(message, sigBytes, pkBytes) {
  * @param {Uint8Array} sk - 4,032-byte secret key from mlKeygen.
  * @param {Object} [opts] - Options: {deterministic: bool, rnd: Uint8Array|null}.
  * @returns {Uint8Array} Signature bytes (3,309 bytes for ML-DSA-65).
+ * This caller-owned buffer is not zeroized by mlSign.
  */
 // Wraps mlSignInternal with fixed-minimum-duration padding (see
 // mlDsaPadSigning). All public signing paths route through this so the
@@ -3730,6 +3732,7 @@ function mlVerifyInternalApi(message, sig, pk) {
  * @param {Uint8Array} [ctx=new Uint8Array(0)] - Context string (0-255 bytes).
  * @param {Object} [opts] - Options: {deterministic: bool, rnd: Uint8Array|null}.
  * @returns {Uint8Array} Signature bytes (3,309 bytes for ML-DSA-65).
+ * This caller-owned buffer is not zeroized by this API.
  */
 function mlSignWithContext(message, sk, ctx, opts) {
   message = toBytes(message);
@@ -3832,8 +3835,8 @@ function _createMlDsaWorkerURL() {
 }
 
 /**
- * Async wrapper for mlSign. In browsers with Worker/Blob support, ML-DSA signing
- * runs off the UI thread and the worker-owned secret-key copy is wiped after use.
+ * Async wrapper for mlSign. Browser environments with Worker/Blob support run ML-DSA signing
+ * off the UI thread and the worker-owned secret-key copy is wiped after use.
  * In pure-JS / non-browser environments (e.g. Node.js, or workers without nested
  * Worker support) it falls back to a main-thread sign scheduled on a future tick,
  * so the API still resolves everywhere without requiring Web Workers.
@@ -3943,7 +3946,7 @@ module.exports = {
 // ── crypto/ml_kem.js ──
 _dirs["./crypto/ml_kem"] = "./crypto";
 _modules["./crypto/ml_kem"] = function(module, exports, require) {
-// Copyright (c) 2026 Lock.com — MIT License
+// Copyright (c) 2026 Lock.com — PolyForm Shield License 1.0.0
 
 "use strict";
 
@@ -4532,7 +4535,7 @@ module.exports = {
 // ── crypto/slh_dsa.js ──
 _dirs["./crypto/slh_dsa"] = "./crypto";
 _modules["./crypto/slh_dsa"] = function(module, exports, require) {
-// Copyright (c) 2026 Lock.com — MIT License
+// Copyright (c) 2026 Lock.com — PolyForm Shield License 1.0.0
 
 "use strict";
 
@@ -5705,7 +5708,7 @@ module.exports = {
 // ── crypto/hybrid_dsa.js ──
 _dirs["./crypto/hybrid_dsa"] = "./crypto";
 _modules["./crypto/hybrid_dsa"] = function(module, exports, require) {
-// Copyright (c) 2026 Lock.com — MIT License
+// Copyright (c) 2026 Lock.com — PolyForm Shield License 1.0.0
 
 "use strict";
 
@@ -5946,7 +5949,7 @@ module.exports = {
 // ── crypto/hybrid_kem.js ──
 _dirs["./crypto/hybrid_kem"] = "./crypto";
 _modules["./crypto/hybrid_kem"] = function(module, exports, require) {
-// Copyright (c) 2026 Lock.com — MIT License
+// Copyright (c) 2026 Lock.com — PolyForm Shield License 1.0.0
 
 "use strict";
 
@@ -6229,7 +6232,7 @@ module.exports = {
 // ── crypto/aes_gcm.js ──
 _dirs["./crypto/aes_gcm"] = "./crypto";
 _modules["./crypto/aes_gcm"] = function(module, exports, require) {
-// Copyright (c) 2026 Lock.com — MIT License
+// Copyright (c) 2026 Lock.com — PolyForm Shield License 1.0.0
 
 "use strict";
 
@@ -6636,7 +6639,7 @@ module.exports = { aesGcmEncrypt, aesGcmDecrypt, aesGcmEncryptAsync, aesGcmDecry
 // ── crypto/index.js ──
 _dirs["./crypto"] = "./crypto";
 _modules["./crypto"] = function(module, exports, require) {
-// Copyright (c) 2026 Lock.com — MIT License
+// Copyright (c) 2026 Lock.com — PolyForm Shield License 1.0.0
 
 "use strict";
 
@@ -6732,7 +6735,7 @@ module.exports = {
 // ── seed.js (crypto-only) ──
 _dirs["./seed"] = ".";
 _modules["./seed"] = function(module, exports, require) {
-// Copyright (c) 2026 Lock.com — MIT License
+// Copyright (c) 2026 Lock.com — PolyForm Shield License 1.0.0
 
 "use strict";
 

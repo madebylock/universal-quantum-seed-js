@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Lock.com — MIT License
+// Copyright (c) 2026 Lock.com — PolyForm Shield License 1.0.0
 
 "use strict";
 
@@ -894,6 +894,7 @@ function mlKeygen(seed) {
  * @param {Uint8Array|null} rnd - Explicit 32-byte randomness (overrides modes).
  * @param {boolean} deterministic - If true and rnd is null, uses 0^32.
  * @returns {Uint8Array} Signature bytes (3,309 bytes).
+ * This does not zeroize the caller-owned skBytes buffer.
  */
 function mlSignInternal(message, skBytes, rnd, deterministic) {
   if (skBytes.length !== SK_SIZE) {
@@ -1180,6 +1181,7 @@ function mlVerifyInternal(message, sigBytes, pkBytes) {
  * @param {Uint8Array} sk - 4,032-byte secret key from mlKeygen.
  * @param {Object} [opts] - Options: {deterministic: bool, rnd: Uint8Array|null}.
  * @returns {Uint8Array} Signature bytes (3,309 bytes for ML-DSA-65).
+ * This caller-owned buffer is not zeroized by mlSign.
  */
 // Wraps mlSignInternal with fixed-minimum-duration padding (see
 // mlDsaPadSigning). All public signing paths route through this so the
@@ -1264,6 +1266,7 @@ function mlVerifyInternalApi(message, sig, pk) {
  * @param {Uint8Array} [ctx=new Uint8Array(0)] - Context string (0-255 bytes).
  * @param {Object} [opts] - Options: {deterministic: bool, rnd: Uint8Array|null}.
  * @returns {Uint8Array} Signature bytes (3,309 bytes for ML-DSA-65).
+ * This caller-owned buffer is not zeroized by this API.
  */
 function mlSignWithContext(message, sk, ctx, opts) {
   message = toBytes(message);
@@ -1366,8 +1369,8 @@ function _createMlDsaWorkerURL() {
 }
 
 /**
- * Async wrapper for mlSign. In browsers with Worker/Blob support, ML-DSA signing
- * runs off the UI thread and the worker-owned secret-key copy is wiped after use.
+ * Async wrapper for mlSign. Browser environments with Worker/Blob support run ML-DSA signing
+ * off the UI thread and the worker-owned secret-key copy is wiped after use.
  * In pure-JS / non-browser environments (e.g. Node.js, or workers without nested
  * Worker support) it falls back to a main-thread sign scheduled on a future tick,
  * so the API still resolves everywhere without requiring Web Workers.

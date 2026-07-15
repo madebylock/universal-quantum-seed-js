@@ -1,0 +1,44 @@
+# Copyright (c) 2026 Lock.com — PolyForm Shield License 1.0.0
+
+name: Bug report
+description: Report a reproducible non-security defect
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not report vulnerabilities or include seeds, keys, passphrases, user data, or production logs. Use the Security tab for private reporting.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Release version or commit hash where the issue occurs.
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options: [Windows, macOS, Linux, Browser, Other]
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Minimal steps using synthetic, non-sensitive fixtures.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Redacted diagnostics, screenshots, or related issues.

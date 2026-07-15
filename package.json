@@ -1,7 +1,7 @@
 {
   "name": "universal-quantum-seed",
   "version": "1.0.0",
-  "description": "The world's first quantum-safe visual + multilingual seed phrase system. Pure JavaScript, zero dependencies.",
+  "description": "Visual and multilingual seed phrases with hybrid classical and post-quantum cryptographic primitives.",
   "main": "index.js",
   "files": [
     "index.js",
@@ -14,7 +14,7 @@
     "README.md"
   ],
   "scripts": {
-    "compile": "python tools/compile-js.py",
+    "compile": "python tools/compile-js.py && node tools/build-browser.js && python tools/compile-crypto-js.py",
     "test": "node tools/test.js && node tools/kat-test.js"
   },
   "keywords": [
@@ -37,7 +37,7 @@
     "entropy"
   ],
   "author": "Lock.com",
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "repository": {
     "type": "git",
     "url": "https://github.com/madebylock/universal-quantum-seed-js"

@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 Lock.com — PolyForm Shield License 1.0.0
+
 // build-browser.js — Bundle universal-quantum-seed-js for the browser
 //
 // Usage: node tools/build-browser.js
@@ -53,7 +55,7 @@ function build() {
   // IIFE header
   parts.push(`// Universal Quantum Seed v${version} — Browser Bundle
 // https://github.com/madebylock/universal-quantum-seed-js
-// MIT License — (c) 2026 Lock.com
+// Copyright (c) 2026 Lock.com — PolyForm Shield License 1.0.0
 //
 // Usage:
 //   <script src="uqs.js"><\/script>
@@ -159,7 +161,7 @@ try {
     ecma: 2020,
     compress: { passes: 2 },
     mangle: { toplevel: false },
-    output: { comments: /^!|MIT|License|Copyright/i },
+    output: { comments: /^!|PolyForm|License|Copyright/i },
   }).then(result => {
     if (result.code) {
       const minPath = path.join(DIST, "uqs.min.js");

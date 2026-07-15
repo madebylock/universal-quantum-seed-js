@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Lock.com — PolyForm Shield License 1.0.0
+
 LABEL = "English"
 
 SEED_WORDS = {

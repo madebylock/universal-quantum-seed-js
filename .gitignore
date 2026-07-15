@@ -31,4 +31,71 @@ desktop.ini
 
 # Environment
 .env
+.env.*
+!.env.example
 nul
+
+# Local environments, analysis, and coverage
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Credentials, signing material, infrastructure, and wallet data
+.netrc
+.npmrc
+.pypirc
+*.auto.tfvars
+*.db
+*.jks
+*.key
+*.keystore
+*.ovpn
+*.p12
+*.pem
+*.pfx
+*.seed
+*.sqlite
+*.sqlite3
+*.tfvars
+*.wallet
+application_default_credentials.json
+auth.json
+credentials.json
+id_ed25519
+id_rsa
+keystore.properties
+service-account.json
+secrets.json
+signing.properties
+terraform.tfstate
+
+# Local tooling caches, audit captures, and transient output
+/artifacts/
+/node_modules/
+/.npm/
+/.nyc_output/
+/coverage/
+/*.tgz
+/.cache/
+/.hypothesis/
+/.nox/
+/.tox/
+/.workspace/
+/.codex_*
+/_artifacts/
+/logs/
+/tmp/
+*.bak
+*.err
+*.log
+*.log.*
+*.out
+*.pid
+*.tmp
+.coverage.*
+coverage.xml
+
+# dist/ contains the reviewed browser bundles and is intentionally versioned.

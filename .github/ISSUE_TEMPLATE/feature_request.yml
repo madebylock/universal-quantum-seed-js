@@ -1,0 +1,33 @@
+# Copyright (c) 2026 Lock.com — PolyForm Shield License 1.0.0
+
+name: Feature request
+description: Propose a user-facing or developer improvement
+title: "[Feature]: "
+labels: ["enhancement", "triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user or developer problem should be solved?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the outcome, not only an implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Security and compatibility impact
+      description: Seed vectors, cryptography, data formats, permissions, and migration considerations.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Other approaches or workarounds considered.

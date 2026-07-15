@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Lock.com — PolyForm Shield License 1.0.0
+
 LABEL = "日本語"
 
 SEED_WORDS = {

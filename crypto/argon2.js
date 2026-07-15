@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Lock.com — MIT License
+// Copyright (c) 2026 Lock.com — PolyForm Shield License 1.0.0
 
 "use strict";
 
@@ -458,7 +458,7 @@ function argon2idAsync(password, salt, timeCost, memoryCost, parallelism, hashLe
       }
     });
   }
-  return Promise.reject(new Error("argon2idAsync requires Web Worker; refusing synchronous main-thread fallback"));
+  return Promise.reject(new Error("Web Worker unavailable for argon2idAsync; refusing synchronous main-thread fallback"));
 }
 
 module.exports = { argon2id, argon2idAsync, blake2b };

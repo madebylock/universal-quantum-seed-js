@@ -1,12 +1,24 @@
 # Universal Quantum Seed — JavaScript Edition
 
-The world's first quantum-safe visual + multilingual seed phrase system.
+A visual and multilingual seed phrase system with hybrid classical and
+post-quantum cryptographic primitives.
 
 **Pure JavaScript. Zero dependencies. Browser + Node.js compatible.**
 
 272-bit entropy | Post-quantum cryptography | 42 languages | 256 icons | 16-bit checksum
 
 ---
+
+## Project Status
+
+This repository is a **v1 release candidate**. Compatibility vectors and the
+test suite are maintained as release gates, but the implementation has not yet
+completed an independent cryptographic security audit. Treat it as pre-release
+software: evaluate it for your threat model and do not rely on it as the sole
+protection for production funds or sensitive accounts.
+
+The browser bundles and wordlist are checked-in generated sources. Continuous
+integration rebuilds them from the canonical files and fails on drift.
 
 ## Features
 
@@ -209,8 +221,12 @@ Post-quantum algorithms are relatively new and their security assumptions are le
 Language data files (`data/languages/*.py`) are copies of the Python edition's originals. To regenerate `words.js` after updating language files:
 
 ```bash
-python tools/compile-js.py
+npm run compile
+git diff --exit-code -- words.js dist/uqs.js dist/uqs-crypto.js
 ```
+
+The final command should produce no diff unless the generated change is
+intentional and included for review.
 
 ## Compatibility
 
@@ -229,6 +245,29 @@ python tools/compile-js.py
 
 The JavaScript edition includes both PBKDF2-SHA512 (600,000 iterations) and Argon2id (pure JavaScript) for key derivation. Both produce identical outputs cross-platform.
 
+## Security
+
+Generate entropy only in a supported environment that provides
+`crypto.getRandomValues()` or `crypto.randomBytes()`. Keep seeds, passphrases,
+derived keys, and secret keys out of logs and persistent browser storage. Use
+synthetic fixtures in tests and examples.
+
+Report suspected vulnerabilities privately using the process in
+[SECURITY.md](SECURITY.md). Do not include exploit details or secret material
+in a public issue.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development commands, generator
+checks, compatibility expectations, and the pull-request process. Significant
+cryptographic, seed-format, or wordlist changes should be discussed before
+implementation and accompanied by compatibility and failure-path tests.
+
 ## License
 
-MIT License — see [LICENSE](LICENSE)
+PolyForm Shield License 1.0.0 — see [LICENSE](LICENSE)
+
+Visual icons are from [Microsoft Fluent Emoji](https://github.com/microsoft/fluentui-emoji)
+(flat style), used under the MIT License; see
+[data/visuals/LICENSE](data/visuals/LICENSE) and the pinned asset provenance in
+[data/visuals/NOTICE.md](data/visuals/NOTICE.md).
