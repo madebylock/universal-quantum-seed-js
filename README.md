@@ -5,7 +5,7 @@ post-quantum cryptographic primitives.
 
 **Pure JavaScript. Zero dependencies. Browser + Node.js compatible.**
 
-272-bit entropy | Post-quantum cryptography | 42 languages | 256 icons | 16-bit checksum
+272-bit entropy | Post-quantum cryptography | 42 languages | 256 icons | Packed 12/14-bit checksum
 
 ---
 
@@ -23,6 +23,7 @@ integration rebuilds them from the canonical files and fails on drift.
 ## Features
 
 - **36-word quantum-safe seeds** — 272-bit entropy survives Grover's algorithm
+- **No repeated icons** — every icon in a phrase is distinct; the 12-bit (36w) / 14-bit (24w) HMAC-SHA-256 checksum is packed into the icon encoding, not spent on separate checksum words
 - **42 languages** — Write your seed in any language, recover in any other
 - **256 visual icons** — Skip words entirely and select icons
 - **Post-quantum cryptography** — ML-DSA-65, SLH-DSA-SHAKE-128s, ML-KEM-768
@@ -91,7 +92,7 @@ const hSs2 = uqs.hybridKemDecaps(hybridKemKp.sk, hCt);
 | `resolve(words, strict?)` | Resolve words/indexes to canonical indexes |
 | `search(prefix, limit?)` | Search words by prefix |
 | `getLanguages()` | List available languages |
-| `verifyChecksum(seed)` | Verify seed checksum |
+| `verifyChecksum(seed)` | Verify the packed seed checksum (a repeated icon is rejected first) |
 
 ### Key Derivation
 

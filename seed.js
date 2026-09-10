@@ -4,11 +4,14 @@
 
 // Universal Quantum Seed — Core API (JavaScript port of seed.py)
 //
-// Generates cryptographically secure seeds using 256 visual icons (8 bits each).
-// - 24 words = 22 random + 2 checksum = 176 bits entropy
+// Generates cryptographically secure seeds as a sequence of DISTINCT icons
+// drawn from a 256-icon table. The random entropy and an HMAC-SHA-256
+// checksum are packed into one integer and unranked into a permutation
+// without replacement, so no icon ever repeats within a phrase.
+// - 24 words = 22 entropy bytes + 14-bit checksum = 176 bits entropy
 //   (accepted for recovery/classical compatibility, not recommended for new
 //   long-term seeds)
-// - 36 words = 34 random + 2 checksum = 272 bits entropy
+// - 36 words = 34 entropy bytes + 12-bit checksum = 272 bits entropy
 //   (recommended default and required for post-quantum derivation)
 
 const { sha256, sha512, hmacSha256, hmacSha512, hkdfExpand, pbkdf2Sha512, pbkdf2Sha512Async } = require("./crypto/sha2");
@@ -553,29 +556,134 @@ function collectEntropy(nBytes, extraEntropy) {
   return result;
 }
 
-// ── Checksum ────────────────────────────────────────────────────
+// ── Duplicate-free seed encoding ────────────────────────────────
+// A UQS phrase is a sequence of DISTINCT icon indexes. The random entropy
+// (34 or 22 bytes) and the checksum are packed into one integer that is
+// unranked into a permutation-without-replacement of the 256-icon table
+// (falling-factorial mixed radix: position i draws from the 256-i icons not
+// yet used). The map is a bijection onto a subset of the duplicate-free
+// phrases, so no entropy is lost, no icon ever repeats within a phrase, and
+// a phrase containing a repeated icon is structurally invalid before the
+// checksum is even consulted. Encoding 8*E + C bits into N distinct icons
+// requires 2**(8*E + C) <= 256!/(256-N)!  — the layouts below satisfy that.
+// Mirrors seed.py (_SEED_LAYOUT, _compute_checksum, _encode_seed_indexes,
+// _decode_seed_indexes) exactly; the packed value is up to 284 bits, so the
+// rank/unrank arithmetic is done in BigInt.
+const SEED_LAYOUT = Object.freeze({
+  // wordCount: { entropyBytes, checksumBits }
+  36: Object.freeze({ entropyBytes: 34, checksumBits: 12 }),  // 272 + 12 = 284 bits <= log2(256!/220!) = 284.3
+  24: Object.freeze({ entropyBytes: 22, checksumBits: 14 }),  // 176 + 14 = 190 bits <= log2(256!/232!) = 190.4
+});
 
-function computeChecksum(indexes, optionsOrVersion = UQS_VERSION) {
+function _seedLayout(wordCount) {
+  // Return { entropyBytes, checksumBits } for a supported word count.
+  if (!Object.prototype.hasOwnProperty.call(SEED_LAYOUT, wordCount)) {
+    throw new Error("wordCount must be 24 or 36");
+  }
+  return SEED_LAYOUT[wordCount];
+}
+
+function _bytesToBigInt(bytes) {
+  // Big-endian unsigned integer from bytes.
+  let value = 0n;
+  for (const b of bytes) value = (value << 8n) | BigInt(b & 0xff);
+  return value;
+}
+
+function _bigIntToBytes(value, length) {
+  // Big-endian fixed-length bytes from a non-negative BigInt (< 256**length).
+  const out = new Uint8Array(length);
+  for (let i = length - 1; i >= 0; i--) {
+    out[i] = Number(value & 0xffn);
+    value >>= 8n;
+  }
+  return out;
+}
+
+function computeChecksum(entropy, wordCount, optionsOrVersion = UQS_VERSION) {
+  // Return the checksum integer for the entropy bytes of a seed.
+  //
   // Intentional: this checksum detects transcription mistakes; it is not an
-  // authenticity check. Two 8-bit words give 16 bits of error detection,
-  // stronger than BIP39's 24-word checksum, while preserving the seed format.
-  // Widening it would remove entropy words and break existing seed recovery
-  // unless introduced as a separate versioned format.
+  // authenticity check. It is the top `checksumBits` (12 for 36 words, 14
+  // for 24) of HMAC-SHA-256(domain || "-checksum", entropy) — still 16-64x
+  // stronger than BIP39's 8-bit 24-word checksum — and it is packed into the
+  // icon encoding rather than spent on separate checksum words.
+  const { checksumBits } = _seedLayout(wordCount);
   const { version } = _seedOptions(optionsOrVersion);
   const key = concatBytes(_domainForVersion(version), toBytes("-checksum"));
-  const digest = hmacSha256(key, new Uint8Array(indexes));
-  return [digest[0], digest[1]];
+  const digest = hmacSha256(key, new Uint8Array(entropy));
+  return ((digest[0] << 8) | digest[1]) >>> (16 - checksumBits);
+}
+
+function encodeSeedIndexes(entropy, wordCount, optionsOrVersion = UQS_VERSION) {
+  // Pack entropy + checksum and unrank them into distinct icon indexes.
+  const { entropyBytes, checksumBits } = _seedLayout(wordCount);
+  entropy = new Uint8Array(entropy);
+  if (entropy.length !== entropyBytes) {
+    throw new Error(`a ${wordCount}-word seed needs ${entropyBytes} entropy bytes`);
+  }
+  let value = (_bytesToBigInt(entropy) << BigInt(checksumBits))
+    | BigInt(computeChecksum(entropy, wordCount, optionsOrVersion));
+  const unused = Array.from({ length: 256 }, (_, i) => i);
+  const indexes = [];
+  for (let position = 0; position < wordCount; position++) {
+    // Position 0 consumes the least-significant digit.
+    const radix = BigInt(256 - position);
+    const digit = Number(value % radix);
+    value /= radix;
+    indexes.push(unused.splice(digit, 1)[0]);
+  }
+  // Cannot fail: the packed value is below the product of the radices.
+  if (value !== 0n) throw new Error("seed encoding overflow");
+  return indexes;
+}
+
+function decodeSeedIndexes(indexes, optionsOrVersion = UQS_VERSION) {
+  // Rank distinct icon indexes back to entropy bytes, verifying the checksum.
+  //
+  // Returns a Uint8Array of entropy, or null when the phrase is not a valid
+  // UQS seed: unsupported length, an index out of range, a repeated icon, a
+  // packed value in the unrank headroom that encoding never produces, or a
+  // checksum mismatch.
+  if (!indexes || typeof indexes.length !== "number") return null;
+  const wordCount = indexes.length;
+  if (!Object.prototype.hasOwnProperty.call(SEED_LAYOUT, wordCount)) return null;
+  const { entropyBytes, checksumBits } = SEED_LAYOUT[wordCount];
+  const unused = Array.from({ length: 256 }, (_, i) => i);
+  const digits = [];
+  for (let i = 0; i < wordCount; i++) {
+    const idx = indexes[i];
+    if (!Number.isInteger(idx) || idx < 0 || idx > 255) return null;
+    const digit = unused.indexOf(idx);
+    if (digit < 0) return null;  // repeated icon: structurally invalid
+    digits.push(digit);
+    unused.splice(digit, 1);
+  }
+  let value = 0n;
+  for (let position = wordCount - 1; position >= 0; position--) {
+    value = value * BigInt(256 - position) + BigInt(digits[position]);
+  }
+  const shift = BigInt(checksumBits);
+  if ((value >> shift) >= (1n << BigInt(8 * entropyBytes))) {
+    return null;  // headroom above the encodable range: never produced
+  }
+  const checksum = Number(value & ((1n << shift) - 1n));
+  const entropy = _bigIntToBytes(value >> shift, entropyBytes);
+  const expected = computeChecksum(entropy, wordCount, optionsOrVersion);
+  if (!constantTimeEqual(
+    new Uint8Array([(checksum >> 8) & 0xff, checksum & 0xff]),
+    new Uint8Array([(expected >> 8) & 0xff, expected & 0xff])
+  )) {
+    return null;
+  }
+  return entropy;
 }
 
 function verifyChecksum(seed, optionsOrVersion = UQS_VERSION) {
+  // A valid phrase has a supported length, no repeated icon, and a packed
+  // checksum that matches its entropy.
   const indexes = toIndexes(seed);
-  if (indexes.length !== 24 && indexes.length !== 36) return false;
-  const data = indexes.slice(0, -2);
-  const expected = computeChecksum(data, optionsOrVersion);
-  return constantTimeEqual(
-    new Uint8Array([indexes[indexes.length - 2], indexes[indexes.length - 1]]),
-    new Uint8Array(expected)
-  );
+  return decodeSeedIndexes(indexes, optionsOrVersion) !== null;
 }
 
 function validateSeed(seed, optionsOrVersion = UQS_VERSION) {
@@ -665,17 +773,18 @@ function getSeed(words, passphrase = "", optionsOrVersion = UQS_VERSION) {
     throw new Error(`seed must be 24 or 36 words, got ${indexes.length}`);
   }
 
-  const data = indexes.slice(0, -2);
-  const expected = computeChecksum(data, version);
-  if (!constantTimeEqual(
-    new Uint8Array([indexes[indexes.length - 2], indexes[indexes.length - 1]]),
-    new Uint8Array(expected)
-  )) {
+  // Step 0: Decode the distinct icons back to the entropy bytes (rejecting a
+  // repeated icon or a checksum mismatch). Only the recovered entropy enters
+  // the KDF, one byte per tagged slot — the icon encoding and checksum are
+  // never reach the KDF.
+  const entropy = decodeSeedIndexes(indexes, version);
+  if (entropy === null) {
     throw new Error("invalid seed checksum");
   }
 
   // Step 1-2: Build a versioned, position-tagged, length-prefixed payload.
-  const payload = _buildSeedPayload(data, passphrase, version);
+  const payload = _buildSeedPayload(entropy, passphrase, version);
+  zeroize(entropy);
 
   // Step 3: HKDF-Extract
   const prk = hmacSha512(domain, payload);
@@ -706,17 +815,16 @@ async function getSeedAsync(words, passphrase = "", optionsOrVersion = UQS_VERSI
     throw new Error(`seed must be 24 or 36 words, got ${indexes.length}`);
   }
 
-  const data = indexes.slice(0, -2);
-  const expected = computeChecksum(data, version);
-  if (!constantTimeEqual(
-    new Uint8Array([indexes[indexes.length - 2], indexes[indexes.length - 1]]),
-    new Uint8Array(expected)
-  )) {
+  // Decode the distinct icons back to the entropy bytes (rejecting a repeated
+  // icon or a checksum mismatch); only the recovered entropy enters the KDF.
+  const entropy = decodeSeedIndexes(indexes, version);
+  if (entropy === null) {
     throw new Error("invalid seed checksum");
   }
 
   // Build a versioned, position-tagged, length-prefixed payload.
-  const payload = _buildSeedPayload(data, passphrase, version);
+  const payload = _buildSeedPayload(entropy, passphrase, version);
+  zeroize(entropy);
 
   const prk = hmacSha512(domain, payload);
   zeroize(payload);
@@ -852,7 +960,7 @@ function generateWords(wordCount = 36, extraEntropy = null, language = null) {
     throw new Error("wordCount must be 24 or 36");
   }
 
-  const dataCount = wordCount - 2;
+  const { entropyBytes: dataCount } = _seedLayout(wordCount);  // 34/12 or 22/14
   let wordMap = BASE;
   if (language && language !== "english") {
     const lang = LANGUAGES[language];
@@ -873,9 +981,11 @@ function generateWords(wordCount = 36, extraEntropy = null, language = null) {
   }
 
   const entropy = collectEntropy(dataCount, extraEntropy);
-  const indexes = [...entropy];
-  indexes.push(...computeChecksum(indexes));
-  return indexes.map((idx, pos) => ({ index: idx, word: wordMap[idx] || String(idx) }));
+  // Pack the entropy with its checksum and unrank into DISTINCT icons: no
+  // icon ever repeats within a phrase, and no entropy is lost doing so.
+  const indexes = encodeSeedIndexes(entropy, wordCount);
+  zeroize(entropy);
+  return indexes.map(idx => ({ index: idx, word: wordMap[idx] || String(idx) }));
 }
 
 function generateSeed(wordCount = 36, extraEntropy = null, language = null) {
@@ -902,7 +1012,13 @@ function getFingerprint(seed, passphrase = "", { bits = 32 } = {}) {
 // ── Entropy Bits ────────────────────────────────────────────────
 
 function getEntropyBits(wordCount, passphrase = "") {
-  const seedBits = (wordCount - 2) * 8;
+  // Seed entropy: entropyBytes x 8 bits — 272 for 36 words (34 bytes), 176
+  // for 24 (22 bytes). The checksum is packed into the icon encoding and
+  // adds no entropy.
+  // Unsupported counts keep the historical (wordCount - 2) * 8 estimate so
+  // UI sliders and callers behave exactly as the Python reference.
+  const layout = SEED_LAYOUT[wordCount];
+  const seedBits = (layout ? layout.entropyBytes : wordCount - 2) * 8;
   // Normalize so the estimate reflects the same NFKC form the KDF consumes.
   passphrase = String(passphrase).normalize("NFKC");
   if (!passphrase) return seedBits;
@@ -1051,6 +1167,9 @@ module.exports = {
   canonicalWord,
   verifyChecksum,
   validateSeed,
+  computeChecksum,
+  encodeSeedIndexes,
+  decodeSeedIndexes,
   getSeed,
   getSeedAsync,
   getProfile,
