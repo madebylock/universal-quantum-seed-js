@@ -89,5 +89,14 @@ for (const vector of kat.vectors) {
   );
 }
 
+// Post-quantum seed derivation: every published (master_key, algorithm,
+// key_index) must derive exactly this seed, in lockstep with Python.
+for (const vector of kat.quantum_seed_derivation || []) {
+  const master = Uint8Array.from(Buffer.from(vector.master_key_hex, "hex"));
+  const derived = uqs.getQuantumSeed(master, vector.algorithm, vector.key_index);
+  assert(hex(derived) === vector.seed_hex, `${vector.id}: quantum seed`);
+  assert(derived.length === vector.seed_length, `${vector.id}: quantum seed length`);
+}
+
 console.log(`UQS seed KATs: ${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

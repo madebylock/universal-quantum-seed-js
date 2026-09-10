@@ -898,5 +898,61 @@
       ],
       "expect_invalid_checksum": true
     }
+  ],
+  "quantum_seed_derivation": [
+    {
+      "id": "quantum-ml-dsa-seed-0",
+      "description": "ML-DSA-65 seed derivation, key_index=0",
+      "master_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "algorithm": "ml-dsa-65",
+      "key_index": 0,
+      "seed_hex": "5fcada374793cf578d992ae75a588b707b133a6d159539a40f410a626557e56e",
+      "seed_length": 32
+    },
+    {
+      "id": "quantum-ml-dsa-seed-1",
+      "description": "ML-DSA-65 seed derivation, key_index=1 (different from index 0)",
+      "master_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "algorithm": "ml-dsa-65",
+      "key_index": 1,
+      "seed_hex": "eea60be2693d276747e6dcd6d02db9a1f5fca4f2759086d510b6a25931c09103",
+      "seed_length": 32
+    },
+    {
+      "id": "quantum-slh-dsa-seed-0",
+      "description": "SLH-DSA-SHAKE-128s seed derivation, key_index=0",
+      "master_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "algorithm": "slh-dsa-shake-128s",
+      "key_index": 0,
+      "seed_hex": "844786a2f250583514d2ed2b82fd2f2609cc4569d3314c4b2496adfe7ed91cb32bb559572ecc4c4e7b142e05cc91333f",
+      "seed_length": 48
+    },
+    {
+      "id": "quantum-ml-kem-seed-0",
+      "description": "ML-KEM-768 seed derivation, key_index=0",
+      "master_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "algorithm": "ml-kem-768",
+      "key_index": 0,
+      "seed_hex": "5103c034435a787875cb657702213d15c7baa86511b077b43642870a46be5de338c0dfc66e2b375a91cdbb23622ac4b565c51c70f926891607eaf803a1069f72",
+      "seed_length": 64
+    },
+    {
+      "id": "quantum-hybrid-dsa-seed-0",
+      "description": "Hybrid-DSA-65 seed derivation, key_index=0",
+      "master_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "algorithm": "hybrid-dsa-65",
+      "key_index": 0,
+      "seed_hex": "13a77c7130b1df15f7145e2f283d192c2cc5d75ec7a7f2bcf23a5a42744ad78af5611daa26bcc08dca3956972d440db3d3c6be132eb1d6d2aae04ed660f0cffc",
+      "seed_length": 64
+    },
+    {
+      "id": "quantum-hybrid-kem-seed-0",
+      "description": "Hybrid-KEM-768 seed derivation, key_index=0",
+      "master_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "algorithm": "hybrid-kem-768",
+      "key_index": 0,
+      "seed_hex": "b6f1b37921353864c3d6fe44b874c94d052d258cc07e566cf67ed3ebef050543be18f7b2c18c6495215eead851d613c47a195a7db2ef7641b456247f7cee3e2568513c1cb43100aa4b788b18ec08936777a388206cdcca51fb4da5abc9662e60",
+      "seed_length": 96
+    }
   ]
 }
