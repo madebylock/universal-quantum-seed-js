@@ -7900,7 +7900,7 @@ function generateWords(wordCount = 36, extraEntropy = null, language = null) {
   if (!health.pass) {
     throw new Error(
       `Entropy failed validation (${health.passed}/${health.total} samples passed; ` +
-      `${health.required} required) -- RNG source may be compromised. ` +
+      `${health.required} required): the RNG source may be compromised. ` +
       "Do NOT generate seeds on this system."
     );
   }

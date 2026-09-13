@@ -171,5 +171,5 @@ try {
     }
   });
 } catch (_) {
-  console.log("  (terser not installed — skipping minification)");
+  console.log("  (terser not installed, skipping minification)");
 }

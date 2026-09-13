@@ -1,4 +1,4 @@
-# Universal Quantum Seed — JavaScript Edition
+# Universal Quantum Seed: JavaScript Edition
 
 A visual and multilingual seed phrase system with hybrid classical and
 post-quantum cryptographic primitives.
@@ -22,14 +22,14 @@ integration rebuilds them from the canonical files and fails on drift.
 
 ## Features
 
-- **36-word quantum-safe seeds** — 272-bit entropy survives Grover's algorithm
-- **No repeated icons** — every icon in a phrase is distinct; the 12-bit (36w) / 14-bit (24w) HMAC-SHA-256 checksum is packed into the icon encoding, not spent on separate checksum words
-- **42 languages** — Write your seed in any language, recover in any other
-- **256 visual icons** — Skip words entirely and select icons
-- **Post-quantum cryptography** — ML-DSA-65, SLH-DSA-SHAKE-128s, ML-KEM-768
-- **Hybrid classical + post-quantum** — Ed25519 + ML-DSA-65, X25519 + ML-KEM-768
-- **Pure JavaScript** — SHA-2, SHA-3, HMAC, HKDF, PBKDF2, NTT — all from scratch
-- **Zero dependencies** — No npm packages required
+- **36-word quantum-safe seeds**: 272-bit entropy survives Grover's algorithm
+- **No repeated icons**: every icon in a phrase is distinct; the 12-bit (36w) / 14-bit (24w) HMAC-SHA-256 checksum is packed into the icon encoding, not spent on separate checksum words
+- **42 languages**: write your seed in any language, recover in any other
+- **256 visual icons**: skip words entirely and select icons
+- **Post-quantum cryptography**: ML-DSA-65, SLH-DSA-SHAKE-128s, ML-KEM-768
+- **Hybrid classical + post-quantum**: Ed25519 + ML-DSA-65, X25519 + ML-KEM-768
+- **Pure JavaScript**: SHA-2, SHA-3, HMAC, HKDF, PBKDF2 and NTT, all from scratch
+- **Zero dependencies**: no npm packages required
 
 ## Installation
 
@@ -110,31 +110,31 @@ const hSs2 = uqs.hybridKemDecaps(hybridKemKp.sk, hCt);
 | `getQuantumSeed(masterKey, algorithm, keyIndex)` | Derive algorithm-specific seed |
 | `generateQuantumKeypair(masterKey, algorithm, keyIndex)` | Generate PQC keypair |
 
-**ML-DSA-65** (FIPS 204 — Digital Signature)
+**ML-DSA-65** (FIPS 204, Digital Signature)
 
 | Function | Description |
 |----------|-------------|
 | `mlKeygen(seed)` | Generate signing keypair (SK: 4032B, PK: 1952B) |
-| `mlSign(msg, sk, opts?)` | Sign raw message — interoperable with ACVP/KAT vectors |
+| `mlSign(msg, sk, opts?)` | Sign raw message (interoperable with ACVP/KAT vectors) |
 | `mlVerify(msg, sig, pk)` | Verify raw message signature |
 | `mlSignWithContext(msg, sk, ctx?, opts?)` | Sign with FIPS 204 context prefix |
 | `mlVerifyWithContext(msg, sig, pk, ctx?)` | Verify with FIPS 204 context prefix |
 | `mlSignAsync(msg, sk, opts?)` | Async sign (yields to event loop) |
 | `mlVerifyAsync(msg, sig, pk)` | Async verify (yields to event loop) |
 
-**SLH-DSA-SHAKE-128s** (FIPS 205 — Hash-Based Signature)
+**SLH-DSA-SHAKE-128s** (FIPS 205, Hash-Based Signature)
 
 | Function | Description |
 |----------|-------------|
 | `slhKeygen(seed)` | Generate signing keypair (SK: 64B, PK: 32B) |
-| `slhSign(msg, sk, opts?)` | Sign raw message — interoperable with ACVP/KAT vectors |
+| `slhSign(msg, sk, opts?)` | Sign raw message (interoperable with ACVP/KAT vectors) |
 | `slhVerify(msg, sig, pk)` | Verify raw message signature |
 | `slhSignWithContext(msg, sk, ctx?, opts?)` | Sign with FIPS 205 context prefix |
 | `slhVerifyWithContext(msg, sig, pk, ctx?)` | Verify with FIPS 205 context prefix |
 | `slhSignAsync(msg, sk, opts?)` | Async sign (yields to event loop) |
 | `slhVerifyAsync(msg, sig, pk)` | Async verify (yields to event loop) |
 
-**ML-KEM-768** (FIPS 203 — Key Encapsulation)
+**ML-KEM-768** (FIPS 203, Key Encapsulation)
 
 | Function | Description |
 |----------|-------------|
@@ -142,7 +142,7 @@ const hSs2 = uqs.hybridKemDecaps(hybridKemKp.sk, hCt);
 | `mlKemEncaps(ek, randomness?)` | Encapsulate (CT: 1088B, SS: 32B) |
 | `mlKemDecaps(dk, ct)` | Decapsulate (SS: 32B) |
 
-**Ed25519** (RFC 8032 — Classical Digital Signature)
+**Ed25519** (RFC 8032, Classical Digital Signature)
 
 | Function | Description |
 |----------|-------------|
@@ -150,7 +150,7 @@ const hSs2 = uqs.hybridKemDecaps(hybridKemKp.sk, hCt);
 | `ed25519Sign(msg, sk)` | Sign message (64B signature) |
 | `ed25519Verify(msg, sig, pk)` | Verify signature |
 
-**X25519** (RFC 7748 — Classical Key Exchange)
+**X25519** (RFC 7748, Classical Key Exchange)
 
 | Function | Description |
 |----------|-------------|
@@ -232,10 +232,10 @@ intentional and included for review.
 ## Compatibility
 
 - **Node.js** >= 16.0.0
-- **Browsers** — Any browser with BigInt support (Chrome 67+, Firefox 68+, Safari 14+)
+- **Browsers**: any browser with BigInt support (Chrome 67+, Firefox 68+, Safari 14+)
 - Uses `crypto.getRandomValues()` (browser) or `crypto.randomBytes()` (Node.js) for entropy
 
-**Argon2id** (RFC 9106 — Memory-Hard KDF)
+**Argon2id** (RFC 9106, Memory-Hard KDF)
 
 | Function | Description |
 |----------|-------------|
@@ -266,7 +266,7 @@ implementation and accompanied by compatibility and failure-path tests.
 
 ## License
 
-PolyForm Shield License 1.0.0 — see [LICENSE](LICENSE)
+PolyForm Shield License 1.0.0. See [LICENSE](LICENSE).
 
 Visual icons are from [Microsoft Fluent Emoji](https://github.com/microsoft/fluentui-emoji)
 (flat style), used under the MIT License; see
