@@ -856,6 +856,18 @@ section("constantTimeEqual");
   console.log("  constantTimeEqual: OK");
 })();
 
+// FIPS 197 S-box (test-only copy for the parent process; the fallback child
+// receives the same string). crypto/aes_gcm.js must not contain a table.
+const FIPS197_SBOX_HEX_PARENT =
+  "637c777bf26b6fc53001672bfed7ab76ca82c97dfa5947f0add4a2af9ca472c0" +
+  "b7fd9326363ff7cc34a5e5f171d8311504c723c31896059a071280e2eb27b275" +
+  "09832c1a1b6e5aa0523bd6b329e32f8453d100ed20fcb15b6acbbe394a4c58cf" +
+  "d0efaafb434d338545f9027f503c9fa851a3408f929d38f5bcb6da2110fff3d2" +
+  "cd0c13ec5f974417c4a77e3d645d197360814fdc222a908846eeb814de5e0bdb" +
+  "e0323a0a4906245cc2d3ac629195e479e7c8376d8dd54ea96c56f4ea657aae08" +
+  "ba78252e1ca6b4c6e8dd741f4bbd8b8a703eb5664803f60e613557b986c11d9e" +
+  "e1f8981169d98e949b1e87e9ce5528df8ca1890dbfe6426841992d0fb054bb16";
+
 // ── Forced Pure JS Fallback Tests ───────────────────────────────
 
 section("Forced Pure JS Fallback (child process)");
@@ -869,6 +881,29 @@ let fallbackDone = false;
   const cryptoDir = path.resolve(__dirname, "..", "crypto").replace(/\\/g, "/");
   const utilsPath = path.join(cryptoDir, "utils").replace(/\\/g, "/");
   const x25519Path = path.join(cryptoDir, "x25519").replace(/\\/g, "/");
+  const aesGcmPath = path.join(cryptoDir, "aes_gcm").replace(/\\/g, "/");
+
+  const FIPS197_SBOX_HEX = FIPS197_SBOX_HEX_PARENT;
+
+  // Random AES-256-GCM inputs whose ciphertexts native OpenSSL computes here;
+  // the child must reproduce them byte for byte without native crypto.
+  const aesVectors = [];
+  {
+    const nodeCrypto = require("crypto");
+    for (let i = 0; i < 20; i++) {
+      const key = nodeCrypto.randomBytes(32);
+      const nonce = nodeCrypto.randomBytes(12);
+      const pt = nodeCrypto.randomBytes(i * 13 + (i & 1));
+      const aad = nodeCrypto.randomBytes(i * 3);
+      const cipher = nodeCrypto.createCipheriv("aes-256-gcm", key, nonce);
+      if (aad.length > 0) cipher.setAAD(aad);
+      const ct = Buffer.concat([cipher.update(pt), cipher.final(), cipher.getAuthTag()]);
+      aesVectors.push({
+        key: key.toString("hex"), nonce: nonce.toString("hex"),
+        pt: pt.toString("hex"), aad: aad.toString("hex"), ct: ct.toString("hex"),
+      });
+    }
+  }
 
   // Write the fallback test script to a temp file (avoids Windows shell escaping)
   const tmpFile = path.join(__dirname, "_fallback_test_tmp.js");
@@ -982,6 +1017,55 @@ var prk = crypto.hkdfExtractSha256(salt, ikm);
 check(bytesToHex(prk) === "077709362c2e32df0ddc3f0dc47bba6390b6c73bb50f9c3122ec844ad7c2b3e5", "hkdf-extract fallback");
 var okm = crypto.hkdfExpandSha256(prk, info, 42);
 check(bytesToHex(okm) === "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865", "hkdf-expand fallback");
+
+// AES-256-GCM pure JS path (the production path for browsers without
+// crypto.subtle): NIST SP 800-38D vectors, rejections, byte-equality with
+// native OpenSSL and the exhaustive S-box check.
+var aesGcm = require("${aesGcmPath}");
+var k13 = hexToBytes("0000000000000000000000000000000000000000000000000000000000000000");
+var n13 = hexToBytes("000000000000000000000000");
+var ct13 = crypto.aesGcmEncrypt(k13, n13, new Uint8Array(0));
+check(bytesToHex(ct13) === "530f8afbc74536b9a963b4f1c4cb738b", "aes-gcm fallback NIST tc13 encrypt");
+check(crypto.aesGcmDecrypt(k13, n13, ct13).length === 0, "aes-gcm fallback NIST tc13 decrypt");
+var pt14 = hexToBytes("00000000000000000000000000000000");
+var ct14 = crypto.aesGcmEncrypt(k13, n13, pt14);
+check(bytesToHex(ct14) === "cea7403d4d606b6e074ec5d3baf39d18d0d1c8a799996bf0265b98b5d48ab919", "aes-gcm fallback NIST tc14 encrypt");
+check(bytesToHex(crypto.aesGcmDecrypt(k13, n13, ct14)) === bytesToHex(pt14), "aes-gcm fallback NIST tc14 decrypt");
+var k16 = hexToBytes("feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308");
+var n16 = hexToBytes("cafebabefacedbaddecaf888");
+var pt16 = hexToBytes("d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39");
+var aad16 = hexToBytes("feedfacedeadbeeffeedfacedeadbeefabaddad2");
+var exp16 = "522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f66276fc6ece0f4e1768cddf8853bb2d551b";
+var ct16 = crypto.aesGcmEncrypt(k16, n16, pt16, aad16);
+check(bytesToHex(ct16) === exp16, "aes-gcm fallback NIST tc16 encrypt");
+check(bytesToHex(crypto.aesGcmDecrypt(k16, n16, ct16, aad16)) === bytesToHex(pt16), "aes-gcm fallback NIST tc16 decrypt");
+var badTag = new Uint8Array(ct16);
+badTag[badTag.length - 1] ^= 1;
+var tagRejected = false;
+try { crypto.aesGcmDecrypt(k16, n16, badTag, aad16); } catch (e) { tagRejected = /tag mismatch/.test(e.message); }
+check(tagRejected, "aes-gcm fallback rejects a tampered tag");
+var wrongKey = new Uint8Array(k16);
+wrongKey[0] ^= 1;
+var keyRejected = false;
+try { crypto.aesGcmDecrypt(wrongKey, n16, ct16, aad16); } catch (e) { keyRejected = /tag mismatch/.test(e.message); }
+check(keyRejected, "aes-gcm fallback rejects a wrong key");
+var nativeVectors = ${JSON.stringify(aesVectors)};
+for (var vi = 0; vi < nativeVectors.length; vi++) {
+  var v = nativeVectors[vi];
+  var got = crypto.aesGcmEncrypt(hexToBytes(v.key), hexToBytes(v.nonce), hexToBytes(v.pt), hexToBytes(v.aad));
+  check(bytesToHex(got) === v.ct, "aes-gcm fallback equals native OpenSSL for vector " + vi);
+  var back = crypto.aesGcmDecrypt(hexToBytes(v.key), hexToBytes(v.nonce), hexToBytes(v.ct), hexToBytes(v.aad));
+  check(bytesToHex(back) === v.pt, "aes-gcm fallback decrypts the native ciphertext for vector " + vi);
+}
+var fips197Sbox = hexToBytes("${FIPS197_SBOX_HEX}");
+var sboxOk = fips197Sbox.length === 256;
+for (var base = 0; base < 256; base += 32) {
+  var sboxIn = new Uint8Array(32);
+  for (var si = 0; si < 32; si++) sboxIn[si] = base + si;
+  var sboxOut = aesGcm._subBytesForTest(sboxIn);
+  for (var so = 0; so < 32; so++) if (sboxOut[so] !== fips197Sbox[base + so]) sboxOk = false;
+}
+check(sboxOk, "bitsliced S-box circuit equals the FIPS 197 table for all 256 inputs");
 
 console.log(JSON.stringify({ passed: p, failed: f }));
 process.exit(f > 0 ? 1 : 0);
@@ -1119,6 +1203,50 @@ section("AES-256-GCM");
   let badNonceRejected = false;
   try { crypto.aesGcmEncrypt(rKey, new Uint8Array(8), rPt); } catch (_) { badNonceRejected = true; }
   assert(badNonceRejected, "AES-GCM rejects 8-byte nonce");
+})();
+
+(() => {
+  // The pure JS path is what browsers without crypto.subtle run (plain
+  // http://<LAN address> origins), so its AES must never index memory by a
+  // key or state byte and its GHASH must never branch on a bit of the key,
+  // the hash subkey or the data.
+  const aesGcmSrc = fs.readFileSync(path.join(__dirname, "../crypto/aes_gcm.js"), "utf8");
+  const code = aesGcmSrc
+    .split("\n").map((line) => line.split("//")[0]).join("\n")
+    .replace(/"[^"\n]*"/g, '""');
+  assert(!code.includes("SBOX"), "aes_gcm must not carry an S-box table");
+  assert(code.includes("function bitsliceSbox("), "aes_gcm evaluates the S-box as a boolean circuit");
+
+  const ghStart = code.indexOf("function ghashMul(");
+  const ghEnd = code.indexOf("\n}\n", ghStart);
+  assert(ghStart > 0 && ghEnd > ghStart, "aes_gcm should keep ghashMul");
+  const ghBody = code.slice(ghStart, ghEnd);
+  assert(!ghBody.includes("if ("), "ghashMul must not branch");
+  assert(ghBody.includes("& m"), "ghashMul selects the multiple through a mask");
+
+  const keStart = code.indexOf("function keyExpansion(");
+  const keEnd = code.indexOf("\n}\n", keStart);
+  assert(keStart > 0 && keEnd > keStart, "aes_gcm should keep keyExpansion");
+  const keBody = code.slice(keStart, keEnd);
+  const indexed = new Set();
+  for (const match of keBody.matchAll(/([A-Za-z_]\w*)\[/g)) indexed.add(match[1]);
+  for (const name of indexed) {
+    assert(name === "w" || name === "q" || name === "RCON", "keyExpansion indexes only its own words: " + name);
+  }
+  assert(!/RCON\[(?!k\])/.test(keBody), "RCON is indexed only by the public round counter");
+  assert(keBody.includes("subWord("), "keyExpansion runs SubWord through the bitsliced circuit");
+
+  const aesGcmInternal = require("../crypto/aes_gcm");
+  const sboxTable = Buffer.from(FIPS197_SBOX_HEX_PARENT, "hex");
+  let sboxOk = sboxTable.length === 256;
+  for (let base = 0; base < 256; base += 32) {
+    const input = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) input[i] = base + i;
+    const output = aesGcmInternal._subBytesForTest(input);
+    for (let i = 0; i < 32; i++) if (output[i] !== sboxTable[base + i]) sboxOk = false;
+  }
+  assert(sboxOk, "bitsliced S-box circuit equals the FIPS 197 table for all 256 inputs");
+  console.log("  AES-256-GCM constant-time shape + S-box circuit: OK");
 })();
 
 // ── Summary ───────────────────────────────────────────────────────

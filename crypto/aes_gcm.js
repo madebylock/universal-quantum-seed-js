@@ -3,8 +3,20 @@
 "use strict";
 
 // AES-256-GCM authenticated encryption (NIST SP 800-38D).
-// Pure JavaScript fallback. When Node.js crypto is available, uses native
-// OpenSSL AES-GCM (constant-time, hardware-accelerated via AES-NI).
+//
+// Two implementations live in this module:
+//   1. Native OpenSSL AES-GCM through Node.js crypto, taken only when the
+//      surrounding module system can resolve "crypto". The browser bundles
+//      register their own require that never resolves Node built-ins, so a
+//      bundle always runs implementation 2, in Node.js as well as in browsers.
+//   2. A constant-time pure JavaScript implementation. This is the production
+//      path for every browser context without crypto.subtle, which includes
+//      plain http://<LAN address> origins (SubtleCrypto exists only in secure
+//      contexts), so the web app encrypts every WebSocket frame with it there.
+//      AES is bitsliced in the BearSSL aes_ct layout with the Boyar-Peralta
+//      S-box circuit, so no memory access is indexed by a key or state byte;
+//      GHASH folds every state bit into a mask, so no branch depends on the
+//      key, the hash subkey or the data.
 //
 // Sizes:
 //   Key:   32 bytes (AES-256)
@@ -14,6 +26,10 @@
 // References:
 //   - NIST SP 800-38D: Galois/Counter Mode of Operation (GCM)
 //   - FIPS 197: Advanced Encryption Standard (AES)
+//   - BearSSL aes_ct.c and aes_ct_enc.c (bitslice layout, orthogonalization,
+//     round functions and key schedule ported below)
+//   - Boyar and Peralta, "A depth-16 circuit for the AES S-box" (the
+//     113-gate S-box circuit)
 
 const { toBytes } = require("./utils");
 
@@ -44,84 +60,353 @@ try {
     return new Uint8Array(plain);
   };
 } catch (_) {
-  // Native crypto not available — pure JS fallback (e.g. browser)
+  // Native crypto not available: pure JS constant-time path (browsers, bundles)
 }
 
-// --- AES S-Box ---
+// --- Bitsliced AES-256 (constant time) ---
+//
+// The bitslice layout, orthogonalization, ShiftRows, MixColumns and key
+// schedule below are ported from BearSSL (src/symcipher/aes_ct.c and
+// aes_ct_enc.c):
+//
+//   Copyright (c) 2016 Thomas Pornin <pornin@bolet.org>
+//
+//   Permission is hereby granted, free of charge, to any person obtaining
+//   a copy of this software and associated documentation files (the
+//   "Software"), to deal in the Software without restriction, including
+//   without limitation the rights to use, copy, modify, merge, publish,
+//   distribute, sublicense, and/or sell copies of the Software, and to
+//   permit persons to whom the Software is furnished to do so, subject to
+//   the following conditions:
+//
+//   The above copyright notice and this permission notice shall be
+//   included in all copies or substantial portions of the Software.
+//
+//   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+//   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+//   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+//   NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+//   LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+//   OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+//   WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+//
+// State layout: two 16-byte blocks are held in eight 32-bit words q[0..7].
+// Before orthogonalization q[0], q[2], q[4], q[6] are the four little-endian
+// words of block 0 and q[1], q[3], q[5], q[7] those of block 1. After it,
+// word q[b] holds bit b of all 32 state bytes, with the bit for byte
+// (row r, column c) of block k at position 8 * r + 2 * c + k. ShiftRows is
+// then a rotation inside each 8-bit group, MixColumns a fixed pattern of
+// word rotations and XORs, and SubBytes a boolean circuit evaluated on the
+// eight words at once. Every step is a fixed sequence of AND, OR, XOR and
+// shift operations whose operands never select an address or a branch.
 
-const SBOX = new Uint8Array([
-  0x63,0x7c,0x77,0x7b,0xf2,0x6b,0x6f,0xc5,0x30,0x01,0x67,0x2b,0xfe,0xd7,0xab,0x76,
-  0xca,0x82,0xc9,0x7d,0xfa,0x59,0x47,0xf0,0xad,0xd4,0xa2,0xaf,0x9c,0xa4,0x72,0xc0,
-  0xb7,0xfd,0x93,0x26,0x36,0x3f,0xf7,0xcc,0x34,0xa5,0xe5,0xf1,0x71,0xd8,0x31,0x15,
-  0x04,0xc7,0x23,0xc3,0x18,0x96,0x05,0x9a,0x07,0x12,0x80,0xe2,0xeb,0x27,0xb2,0x75,
-  0x09,0x83,0x2c,0x1a,0x1b,0x6e,0x5a,0xa0,0x52,0x3b,0xd6,0xb3,0x29,0xe3,0x2f,0x84,
-  0x53,0xd1,0x00,0xed,0x20,0xfc,0xb1,0x5b,0x6a,0xcb,0xbe,0x39,0x4a,0x4c,0x58,0xcf,
-  0xd0,0xef,0xaa,0xfb,0x43,0x4d,0x33,0x85,0x45,0xf9,0x02,0x7f,0x50,0x3c,0x9f,0xa8,
-  0x51,0xa3,0x40,0x8f,0x92,0x9d,0x38,0xf5,0xbc,0xb6,0xda,0x21,0x10,0xff,0xf3,0xd2,
-  0xcd,0x0c,0x13,0xec,0x5f,0x97,0x44,0x17,0xc4,0xa7,0x7e,0x3d,0x64,0x5d,0x19,0x73,
-  0x60,0x81,0x4f,0xdc,0x22,0x2a,0x90,0x88,0x46,0xee,0xb8,0x14,0xde,0x5e,0x0b,0xdb,
-  0xe0,0x32,0x3a,0x0a,0x49,0x06,0x24,0x5c,0xc2,0xd3,0xac,0x62,0x91,0x95,0xe4,0x79,
-  0xe7,0xc8,0x37,0x6d,0x8d,0xd5,0x4e,0xa9,0x6c,0x56,0xf4,0xea,0x65,0x7a,0xae,0x08,
-  0xba,0x78,0x25,0x2e,0x1c,0xa6,0xb4,0xc6,0xe8,0xdd,0x74,0x1f,0x4b,0xbd,0x8b,0x8a,
-  0x70,0x3e,0xb5,0x66,0x48,0x03,0xf6,0x0e,0x61,0x35,0x57,0xb9,0x86,0xc1,0x1d,0x9e,
-  0xe1,0xf8,0x98,0x11,0x69,0xd9,0x8e,0x94,0x9b,0x1e,0x87,0xe9,0xce,0x55,0x28,0xdf,
-  0x8c,0xa1,0x89,0x0d,0xbf,0xe6,0x42,0x68,0x41,0x99,0x2d,0x0f,0xb0,0x54,0xbb,0x16,
-]);
-
+// Round constants, indexed only by the public round counter.
 const RCON = new Uint8Array([0x01,0x02,0x04,0x08,0x10,0x20,0x40,0x80,0x1b,0x36]);
 
-// --- AES-256 internals ---
+function swapN(q, i, j, cl, ch, s) {
+  const a = q[i], b = q[j];
+  q[i] = (a & cl) | ((b & cl) << s);
+  q[j] = ((a & ch) >>> s) | (b & ch);
+}
 
-function xtime(a) {
-  return ((a << 1) ^ (((a >>> 7) & 1) * 0x1b)) & 0xff;
+function ortho(q) {
+  // Bit-matrix transpose between the byte layout and the bitsliced layout.
+  // The transform is an involution: applying it twice restores the input.
+  swapN(q, 0, 1, 0x55555555, 0xAAAAAAAA, 1);
+  swapN(q, 2, 3, 0x55555555, 0xAAAAAAAA, 1);
+  swapN(q, 4, 5, 0x55555555, 0xAAAAAAAA, 1);
+  swapN(q, 6, 7, 0x55555555, 0xAAAAAAAA, 1);
+
+  swapN(q, 0, 2, 0x33333333, 0xCCCCCCCC, 2);
+  swapN(q, 1, 3, 0x33333333, 0xCCCCCCCC, 2);
+  swapN(q, 4, 6, 0x33333333, 0xCCCCCCCC, 2);
+  swapN(q, 5, 7, 0x33333333, 0xCCCCCCCC, 2);
+
+  swapN(q, 0, 4, 0x0F0F0F0F, 0xF0F0F0F0, 4);
+  swapN(q, 1, 5, 0x0F0F0F0F, 0xF0F0F0F0, 4);
+  swapN(q, 2, 6, 0x0F0F0F0F, 0xF0F0F0F0, 4);
+  swapN(q, 3, 7, 0x0F0F0F0F, 0xF0F0F0F0, 4);
+}
+
+function bitsliceSbox(q) {
+  // SubBytes on all 32 state bytes at once: the Boyar-Peralta circuit for the
+  // AES S-box (113 gates) evaluated bitwise over the eight state words.
+  // Inputs x0..x7 and outputs s0..s7 are numbered from the high bit down.
+  const x0 = q[7], x1 = q[6], x2 = q[5], x3 = q[4];
+  const x4 = q[3], x5 = q[2], x6 = q[1], x7 = q[0];
+
+  // Top linear transformation.
+  const y14 = x3 ^ x5;
+  const y13 = x0 ^ x6;
+  const y9 = x0 ^ x3;
+  const y8 = x0 ^ x5;
+  const t0 = x1 ^ x2;
+  const y1 = t0 ^ x7;
+  const y4 = y1 ^ x3;
+  const y12 = y13 ^ y14;
+  const y2 = y1 ^ x0;
+  const y5 = y1 ^ x6;
+  const y3 = y5 ^ y8;
+  const t1 = x4 ^ y12;
+  const y15 = t1 ^ x5;
+  const y20 = t1 ^ x1;
+  const y6 = y15 ^ x7;
+  const y10 = y15 ^ t0;
+  const y11 = y20 ^ y9;
+  const y7 = x7 ^ y11;
+  const y17 = y10 ^ y11;
+  const y19 = y10 ^ y8;
+  const y16 = t0 ^ y11;
+  const y21 = y13 ^ y16;
+  const y18 = x0 ^ y16;
+
+  // Non-linear section.
+  const t2 = y12 & y15;
+  const t3 = y3 & y6;
+  const t4 = t3 ^ t2;
+  const t5 = y4 & x7;
+  const t6 = t5 ^ t2;
+  const t7 = y13 & y16;
+  const t8 = y5 & y1;
+  const t9 = t8 ^ t7;
+  const t10 = y2 & y7;
+  const t11 = t10 ^ t7;
+  const t12 = y9 & y11;
+  const t13 = y14 & y17;
+  const t14 = t13 ^ t12;
+  const t15 = y8 & y10;
+  const t16 = t15 ^ t12;
+  const t17 = t4 ^ t14;
+  const t18 = t6 ^ t16;
+  const t19 = t9 ^ t14;
+  const t20 = t11 ^ t16;
+  const t21 = t17 ^ y20;
+  const t22 = t18 ^ y19;
+  const t23 = t19 ^ y21;
+  const t24 = t20 ^ y18;
+
+  const t25 = t21 ^ t22;
+  const t26 = t21 & t23;
+  const t27 = t24 ^ t26;
+  const t28 = t25 & t27;
+  const t29 = t28 ^ t22;
+  const t30 = t23 ^ t24;
+  const t31 = t22 ^ t26;
+  const t32 = t31 & t30;
+  const t33 = t32 ^ t24;
+  const t34 = t23 ^ t33;
+  const t35 = t27 ^ t33;
+  const t36 = t24 & t35;
+  const t37 = t36 ^ t34;
+  const t38 = t27 ^ t36;
+  const t39 = t29 & t38;
+  const t40 = t25 ^ t39;
+
+  const t41 = t40 ^ t37;
+  const t42 = t29 ^ t33;
+  const t43 = t29 ^ t40;
+  const t44 = t33 ^ t37;
+  const t45 = t42 ^ t41;
+  const z0 = t44 & y15;
+  const z1 = t37 & y6;
+  const z2 = t33 & x7;
+  const z3 = t43 & y16;
+  const z4 = t40 & y1;
+  const z5 = t29 & y7;
+  const z6 = t42 & y11;
+  const z7 = t45 & y17;
+  const z8 = t41 & y10;
+  const z9 = t44 & y12;
+  const z10 = t37 & y3;
+  const z11 = t33 & y4;
+  const z12 = t43 & y13;
+  const z13 = t40 & y5;
+  const z14 = t29 & y2;
+  const z15 = t42 & y9;
+  const z16 = t45 & y14;
+  const z17 = t41 & y8;
+
+  // Bottom linear transformation.
+  const t46 = z15 ^ z16;
+  const t47 = z10 ^ z11;
+  const t48 = z5 ^ z13;
+  const t49 = z9 ^ z10;
+  const t50 = z2 ^ z12;
+  const t51 = z2 ^ z5;
+  const t52 = z7 ^ z8;
+  const t53 = z0 ^ z3;
+  const t54 = z6 ^ z7;
+  const t55 = z16 ^ z17;
+  const t56 = z12 ^ t48;
+  const t57 = t50 ^ t53;
+  const t58 = z4 ^ t46;
+  const t59 = z3 ^ t54;
+  const t60 = t46 ^ t57;
+  const t61 = z14 ^ t57;
+  const t62 = t52 ^ t58;
+  const t63 = t49 ^ t58;
+  const t64 = z4 ^ t59;
+  const t65 = t61 ^ t62;
+  const t66 = z1 ^ t63;
+  const s0 = t59 ^ t63;
+  const s6 = t56 ^ ~t62;
+  const s7 = t48 ^ ~t60;
+  const t67 = t64 ^ t65;
+  const s3 = t53 ^ t66;
+  const s4 = t51 ^ t66;
+  const s5 = t47 ^ t65;
+  const s1 = t64 ^ ~s3;
+  const s2 = t55 ^ ~t67;
+
+  q[7] = s0;
+  q[6] = s1;
+  q[5] = s2;
+  q[4] = s3;
+  q[3] = s4;
+  q[2] = s5;
+  q[1] = s6;
+  q[0] = s7;
+}
+
+function shiftRows(q) {
+  for (let i = 0; i < 8; i++) {
+    const x = q[i];
+    q[i] = (x & 0x000000FF)
+      | ((x & 0x0000FC00) >>> 2) | ((x & 0x00000300) << 6)
+      | ((x & 0x00F00000) >>> 4) | ((x & 0x000F0000) << 4)
+      | ((x & 0xC0000000) >>> 6) | ((x & 0x3F000000) << 2);
+  }
+}
+
+function rotr8(x) {
+  return (x >>> 8) | (x << 24);
+}
+
+function rotr16(x) {
+  return (x >>> 16) | (x << 16);
+}
+
+function mixColumns(q) {
+  const q0 = q[0], q1 = q[1], q2 = q[2], q3 = q[3];
+  const q4 = q[4], q5 = q[5], q6 = q[6], q7 = q[7];
+  const r0 = rotr8(q0), r1 = rotr8(q1), r2 = rotr8(q2), r3 = rotr8(q3);
+  const r4 = rotr8(q4), r5 = rotr8(q5), r6 = rotr8(q6), r7 = rotr8(q7);
+
+  q[0] = q7 ^ r7 ^ r0 ^ rotr16(q0 ^ r0);
+  q[1] = q0 ^ r0 ^ q7 ^ r7 ^ r1 ^ rotr16(q1 ^ r1);
+  q[2] = q1 ^ r1 ^ r2 ^ rotr16(q2 ^ r2);
+  q[3] = q2 ^ r2 ^ q7 ^ r7 ^ r3 ^ rotr16(q3 ^ r3);
+  q[4] = q3 ^ r3 ^ q7 ^ r7 ^ r4 ^ rotr16(q4 ^ r4);
+  q[5] = q4 ^ r4 ^ r5 ^ rotr16(q5 ^ r5);
+  q[6] = q5 ^ r5 ^ r6 ^ rotr16(q6 ^ r6);
+  q[7] = q6 ^ r6 ^ r7 ^ rotr16(q7 ^ r7);
+}
+
+function addRoundKey(q, skey, off) {
+  for (let i = 0; i < 8; i++) q[i] ^= skey[off + i];
+}
+
+function aesEncryptPair(skey, q) {
+  // AES-256 (14 rounds) on the two orthogonalized blocks held in q.
+  addRoundKey(q, skey, 0);
+  for (let r = 1; r < 14; r++) {
+    bitsliceSbox(q);
+    shiftRows(q);
+    mixColumns(q);
+    addRoundKey(q, skey, r << 3);
+  }
+  bitsliceSbox(q);
+  shiftRows(q);
+  addRoundKey(q, skey, 14 << 3);
+}
+
+function le32(b, off) {
+  return b[off] | (b[off + 1] << 8) | (b[off + 2] << 16) | (b[off + 3] << 24);
+}
+
+function storeLe32(out, off, x) {
+  out[off] = x & 0xff;
+  out[off + 1] = (x >>> 8) & 0xff;
+  out[off + 2] = (x >>> 16) & 0xff;
+  out[off + 3] = (x >>> 24) & 0xff;
+}
+
+function loadPair(q, a, aOff, b, bOff) {
+  // Load block 0 from a[aOff..] and block 1 from b[bOff..] and orthogonalize.
+  q[0] = le32(a, aOff);
+  q[1] = le32(b, bOff);
+  q[2] = le32(a, aOff + 4);
+  q[3] = le32(b, bOff + 4);
+  q[4] = le32(a, aOff + 8);
+  q[5] = le32(b, bOff + 8);
+  q[6] = le32(a, aOff + 12);
+  q[7] = le32(b, bOff + 12);
+  ortho(q);
+}
+
+function storePair(q, out) {
+  // Undo the orthogonalization and write block 0 to out[0..15], block 1 to
+  // out[16..31].
+  ortho(q);
+  storeLe32(out, 0, q[0]);
+  storeLe32(out, 4, q[2]);
+  storeLe32(out, 8, q[4]);
+  storeLe32(out, 12, q[6]);
+  storeLe32(out, 16, q[1]);
+  storeLe32(out, 20, q[3]);
+  storeLe32(out, 24, q[5]);
+  storeLe32(out, 28, q[7]);
+}
+
+// AES-256 key schedule (FIPS 197 section 5.2). SubWord runs the key bytes
+// through the same bitsliced S-box circuit as the rounds, so the schedule
+// performs no lookup indexed by key material. The round keys are stored
+// orthogonalized, ready for addRoundKey.
+
+const _swq = new Int32Array(8);
+
+function subWord(x) {
+  const q = _swq;
+  for (let i = 0; i < 8; i++) q[i] = x;
+  ortho(q);
+  bitsliceSbox(q);
+  ortho(q);
+  const r = q[0];
+  q.fill(0);
+  return r;
 }
 
 function keyExpansion(key) {
-  const w = new Uint8Array(240);
-  w.set(key);
-  for (let i = 8; i < 60; i++) {
-    let t0 = w[(i - 1) * 4], t1 = w[(i - 1) * 4 + 1];
-    let t2 = w[(i - 1) * 4 + 2], t3 = w[(i - 1) * 4 + 3];
-    if (i % 8 === 0) {
-      const tmp = t0;
-      t0 = SBOX[t1] ^ RCON[i / 8 - 1];
-      t1 = SBOX[t2]; t2 = SBOX[t3]; t3 = SBOX[tmp];
-    } else if (i % 8 === 4) {
-      t0 = SBOX[t0]; t1 = SBOX[t1]; t2 = SBOX[t2]; t3 = SBOX[t3];
+  const w = new Int32Array(60);
+  for (let i = 0; i < 8; i++) w[i] = le32(key, i << 2);
+  let tmp = w[7];
+  for (let i = 8, j = 0, k = 0; i < 60; i++) {
+    if (j === 0) {
+      tmp = (tmp << 24) | (tmp >>> 8);
+      tmp = subWord(tmp) ^ RCON[k];
+    } else if (j === 4) {
+      tmp = subWord(tmp);
     }
-    const base = (i - 8) * 4;
-    w[i * 4]     = w[base]     ^ t0;
-    w[i * 4 + 1] = w[base + 1] ^ t1;
-    w[i * 4 + 2] = w[base + 2] ^ t2;
-    w[i * 4 + 3] = w[base + 3] ^ t3;
-  }
-  return w;
-}
-
-function aesBlock(s, rk) {
-  // AddRoundKey(0)
-  for (let i = 0; i < 16; i++) s[i] ^= rk[i];
-  for (let r = 1; r <= 14; r++) {
-    // SubBytes
-    for (let i = 0; i < 16; i++) s[i] = SBOX[s[i]];
-    // ShiftRows
-    let t = s[1]; s[1] = s[5]; s[5] = s[9]; s[9] = s[13]; s[13] = t;
-    t = s[2]; s[2] = s[10]; s[10] = t; t = s[6]; s[6] = s[14]; s[14] = t;
-    t = s[15]; s[15] = s[11]; s[11] = s[7]; s[7] = s[3]; s[3] = t;
-    // MixColumns (skip on last round)
-    if (r < 14) {
-      for (let c = 0; c < 16; c += 4) {
-        const a0 = s[c], a1 = s[c + 1], a2 = s[c + 2], a3 = s[c + 3];
-        s[c]     = xtime(a0) ^ xtime(a1) ^ a1 ^ a2 ^ a3;
-        s[c + 1] = a0 ^ xtime(a1) ^ xtime(a2) ^ a2 ^ a3;
-        s[c + 2] = a0 ^ a1 ^ xtime(a2) ^ xtime(a3) ^ a3;
-        s[c + 3] = xtime(a0) ^ a0 ^ a1 ^ a2 ^ xtime(a3);
-      }
+    tmp ^= w[i - 8];
+    w[i] = tmp;
+    if (++j === 8) {
+      j = 0;
+      k++;
     }
-    // AddRoundKey
-    const off = r * 16;
-    for (let i = 0; i < 16; i++) s[i] ^= rk[off + i];
   }
+  const skey = new Int32Array(120);
+  const q = new Int32Array(8);
+  for (let r = 0; r < 15; r++) {
+    for (let c = 0; c < 4; c++) {
+      q[c << 1] = w[(r << 2) + c];
+      q[(c << 1) + 1] = w[(r << 2) + c];
+    }
+    ortho(q);
+    skey.set(q, r << 3);
+  }
+  w.fill(0);
+  q.fill(0);
+  return skey;
 }
 
 // --- GCM internals ---
@@ -152,26 +437,48 @@ function wipeBuf(buf) {
 }
 
 // Pre-allocated work buffers for GCM — eliminates thousands of
-// per-block Uint8Array allocations that overwhelm GC in browsers
+// per-block allocations that overwhelm GC in browsers
 // without crypto.subtle (non-secure contexts like custom domains).
-const _ghV = new Uint8Array(16);   // ghashMul scratch (V register)
 const _ghO = new Uint8Array(16);   // ghashMul output
-const _ks  = new Uint8Array(16);   // CTR keystream block
+const _q   = new Int32Array(8);    // bitsliced state (two blocks)
+const _ks  = new Uint8Array(32);   // CTR input / keystream, two blocks
+const _zero = new Uint8Array(16);
 
 function ghashMul(Y, H) {
-  // Multiply Y * H in GF(2^128), result written to _ghO.
-  // Caller must copy _ghO before the next ghashMul call.
-  _ghV.set(H);
-  _ghO.fill(0);
+  // Multiply Y * H in GF(2^128) (SP 800-38D section 6.3), result written to
+  // _ghO. Caller must copy _ghO before the next ghashMul call.
+  // Bit-serial over the 128 bits of Y with the running multiple V held in
+  // four 32-bit words. The bit of Y and the reduction feedback bit of V both
+  // select through masks, never through a branch, so the sequence of
+  // operations does not depend on Y, H or the data being hashed.
+  let v0 = (H[0] << 24) | (H[1] << 16) | (H[2] << 8) | H[3];
+  let v1 = (H[4] << 24) | (H[5] << 16) | (H[6] << 8) | H[7];
+  let v2 = (H[8] << 24) | (H[9] << 16) | (H[10] << 8) | H[11];
+  let v3 = (H[12] << 24) | (H[13] << 16) | (H[14] << 8) | H[15];
+  let z0 = 0, z1 = 0, z2 = 0, z3 = 0;
   for (let i = 0; i < 128; i++) {
-    if ((Y[i >>> 3] >>> (7 - (i & 7))) & 1) {
-      for (let j = 0; j < 16; j++) _ghO[j] ^= _ghV[j];
-    }
-    const lsb = _ghV[15] & 1;
-    for (let j = 15; j > 0; j--) _ghV[j] = (_ghV[j] >>> 1) | ((_ghV[j - 1] & 1) << 7);
-    _ghV[0] >>>= 1;
-    if (lsb) _ghV[0] ^= 0xe1;
+    const m = -((Y[i >>> 3] >>> (7 - (i & 7))) & 1);
+    z0 ^= v0 & m;
+    z1 ^= v1 & m;
+    z2 ^= v2 & m;
+    z3 ^= v3 & m;
+    const f = -(v3 & 1);
+    v3 = (v3 >>> 1) | (v2 << 31);
+    v2 = (v2 >>> 1) | (v1 << 31);
+    v1 = (v1 >>> 1) | (v0 << 31);
+    v0 = (v0 >>> 1) ^ (0xe1000000 & f);
   }
+  storeBe32(_ghO, 0, z0);
+  storeBe32(_ghO, 4, z1);
+  storeBe32(_ghO, 8, z2);
+  storeBe32(_ghO, 12, z3);
+}
+
+function storeBe32(out, off, x) {
+  out[off] = (x >>> 24) & 0xff;
+  out[off + 1] = (x >>> 16) & 0xff;
+  out[off + 2] = (x >>> 8) & 0xff;
+  out[off + 3] = x & 0xff;
 }
 
 function ghashBlock(Y, H) {
@@ -210,6 +517,39 @@ function ghashFinalize(Y, H, aadLen, ctLen) {
   ghashBlock(Y, H);
 }
 
+function deriveHashSubkeyAndTagMask(skey, J0, H, ekJ0) {
+  // One bitsliced pass yields H = E_K(0^128) (block 0) and E_K(J0) (block 1).
+  loadPair(_q, _zero, 0, J0, 0);
+  aesEncryptPair(skey, _q);
+  storePair(_q, _ks);
+  H.set(_ks.subarray(0, 16));
+  ekJ0.set(_ks.subarray(16, 32));
+}
+
+function aesCtrXor(skey, ctr, src, dst) {
+  // dst = src XOR AES-CTR keystream, two counter blocks per bitsliced pass.
+  // incCtr runs once per consumed 16-byte block, exactly as many times as
+  // there are blocks, so the NIST counter-exhaustion check is unchanged.
+  const n = src.length;
+  for (let off = 0; off < n; off += 32) {
+    incCtr(ctr);
+    _ks.set(ctr, 0);
+    if (off + 16 < n) incCtr(ctr);
+    _ks.set(ctr, 16);
+    loadPair(_q, _ks, 0, _ks, 16);
+    aesEncryptPair(skey, _q);
+    storePair(_q, _ks);
+    const end = Math.min(32, n - off);
+    for (let i = 0; i < end; i++) dst[off + i] = src[off + i] ^ _ks[i];
+  }
+}
+
+function wipeWorkBuffers() {
+  wipeBuf(_q);
+  wipeBuf(_ks);
+  wipeBuf(_ghO);
+}
+
 // --- Public API ---
 
 /**
@@ -238,10 +578,10 @@ function aesGcmEncrypt(key, nonce, plaintext, aad) {
 
   if (_nativeEncrypt) return _nativeEncrypt(key, nonce, plaintext, aad);
 
-  // Pure-JS fallback
-  const rk = keyExpansion(key);
+  // Pure-JS constant-time path
+  const skey = keyExpansion(key);
   const H = new Uint8Array(16);
-  aesBlock(H, rk);
+  const ekJ0 = new Uint8Array(16);
 
   try {
     // J0 = nonce || 0x00000001
@@ -249,25 +589,19 @@ function aesGcmEncrypt(key, nonce, plaintext, aad) {
     J0.set(nonce);
     J0[15] = 1;
 
+    deriveHashSubkeyAndTagMask(skey, J0, H, ekJ0);
+
     // Encrypt with AES-CTR starting at J0+1
     const ct = new Uint8Array(plaintext.length);
     const ctr = new Uint8Array(J0);
-    for (let off = 0; off < plaintext.length; off += 16) {
-      incCtr(ctr);
-      _ks.set(ctr);
-      aesBlock(_ks, rk);
-      const end = Math.min(16, plaintext.length - off);
-      for (let i = 0; i < end; i++) ct[off + i] = plaintext[off + i] ^ _ks[i];
-    }
+    aesCtrXor(skey, ctr, plaintext, ct);
 
     // Compute GHASH tag (streaming — no buildGhashInput allocation)
     const tag = new Uint8Array(16);
     ghashUpdate(tag, H, aad);
     ghashUpdate(tag, H, ct);
     ghashFinalize(tag, H, aad.length, ct.length);
-    _ks.set(J0);
-    aesBlock(_ks, rk);
-    for (let i = 0; i < 16; i++) tag[i] ^= _ks[i];
+    for (let i = 0; i < 16; i++) tag[i] ^= ekJ0[i];
 
     // Return ct || tag
     const result = new Uint8Array(ct.length + 16);
@@ -275,8 +609,10 @@ function aesGcmEncrypt(key, nonce, plaintext, aad) {
     result.set(tag, ct.length);
     return result;
   } finally {
-    wipeBuf(rk);
+    wipeBuf(skey);
     wipeBuf(H);
+    wipeBuf(ekJ0);
+    wipeWorkBuffers();
   }
 }
 
@@ -309,14 +645,14 @@ function aesGcmDecrypt(key, nonce, ciphertextWithTag, aad) {
 
   if (_nativeDecrypt) return _nativeDecrypt(key, nonce, ciphertextWithTag, aad);
 
-  // Pure-JS fallback — use subarray (views) to avoid copying data
+  // Pure-JS constant-time path; subarray views avoid copying data
   const ctLen = ciphertextWithTag.length - 16;
   const ct = ciphertextWithTag.subarray(0, ctLen);
   const receivedTag = ciphertextWithTag.subarray(ctLen);
 
-  const rk = keyExpansion(key);
+  const skey = keyExpansion(key);
   const H = new Uint8Array(16);
-  aesBlock(H, rk);
+  const ekJ0 = new Uint8Array(16);
 
   try {
     // J0 = nonce || 0x00000001
@@ -324,14 +660,14 @@ function aesGcmDecrypt(key, nonce, ciphertextWithTag, aad) {
     J0.set(nonce);
     J0[15] = 1;
 
+    deriveHashSubkeyAndTagMask(skey, J0, H, ekJ0);
+
     // Verify tag (streaming GHASH — no buildGhashInput allocation)
     const computedTag = new Uint8Array(16);
     ghashUpdate(computedTag, H, aad);
     ghashUpdate(computedTag, H, ct);
     ghashFinalize(computedTag, H, aad.length, ct.length);
-    _ks.set(J0);
-    aesBlock(_ks, rk);
-    for (let i = 0; i < 16; i++) computedTag[i] ^= _ks[i];
+    for (let i = 0; i < 16; i++) computedTag[i] ^= ekJ0[i];
 
     // Constant-time tag comparison
     let diff = 0;
@@ -341,18 +677,14 @@ function aesGcmDecrypt(key, nonce, ciphertextWithTag, aad) {
     // Decrypt
     const plaintext = new Uint8Array(ct.length);
     const ctr = new Uint8Array(J0);
-    for (let off = 0; off < ct.length; off += 16) {
-      incCtr(ctr);
-      _ks.set(ctr);
-      aesBlock(_ks, rk);
-      const end = Math.min(16, ct.length - off);
-      for (let i = 0; i < end; i++) plaintext[off + i] = ct[off + i] ^ _ks[i];
-    }
+    aesCtrXor(skey, ctr, ct, plaintext);
 
     return plaintext;
   } finally {
-    wipeBuf(rk);
+    wipeBuf(skey);
     wipeBuf(H);
+    wipeBuf(ekJ0);
+    wipeWorkBuffers();
   }
 }
 
@@ -398,4 +730,23 @@ function aesGcmDecryptAsync(key, nonce, ciphertextWithTag, aad) {
   return _maybeYield(result);
 }
 
-module.exports = { aesGcmEncrypt, aesGcmDecrypt, aesGcmEncryptAsync, aesGcmDecryptAsync };
+/**
+ * Test hook: SubBytes over 32 bytes (two blocks) through the bitsliced
+ * S-box circuit. Lets a test compare the circuit with the FIPS 197 table
+ * without any table living in this module.
+ */
+function _subBytesForTest(input) {
+  input = toBytes(input);
+  if (input.length !== 32) throw new Error("_subBytesForTest expects 32 bytes");
+  const q = new Int32Array(8);
+  loadPair(q, input, 0, input, 16);
+  bitsliceSbox(q);
+  const out = new Uint8Array(32);
+  storePair(q, out);
+  return out;
+}
+
+module.exports = {
+  aesGcmEncrypt, aesGcmDecrypt, aesGcmEncryptAsync, aesGcmDecryptAsync,
+  _subBytesForTest,
+};
