@@ -954,5 +954,73 @@
       "seed_hex": "b6f1b37921353864c3d6fe44b874c94d052d258cc07e566cf67ed3ebef050543be18f7b2c18c6495215eead851d613c47a195a7db2ef7641b456247f7cee3e2568513c1cb43100aa4b788b18ec08936777a388206cdcca51fb4da5abc9662e60",
       "seed_length": 96
     }
+  ],
+  "quantum_keypair": [
+    {
+      "id": "quantum-ml-dsa-keypair-0",
+      "description": "ml-dsa-65 keypair from the key_index=0 quantum seed (SHA-256 of the secret and public key bytes)",
+      "master_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "algorithm": "ml-dsa-65",
+      "key_index": 0,
+      "secret_key_length": 4032,
+      "public_key_length": 1952,
+      "secret_key_sha256": "a90f82f23d491ea7a4b36e07e24db9f370cdd0b6d5f0e4dc4dc6a73ca0f13ed5",
+      "public_key_sha256": "66cce1d9a385e7755ed1d3d3f13489688abb6b251326b4338dc7fb62bbea78a4"
+    },
+    {
+      "id": "quantum-ml-dsa-keypair-1",
+      "description": "ml-dsa-65 keypair from the key_index=1 quantum seed (SHA-256 of the secret and public key bytes)",
+      "master_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "algorithm": "ml-dsa-65",
+      "key_index": 1,
+      "secret_key_length": 4032,
+      "public_key_length": 1952,
+      "secret_key_sha256": "c468e5ae94990d77c6c58bbcf9f88cfc3a140e9dd53159203535c92acb8b9d54",
+      "public_key_sha256": "5e54d6eaceeefd909377fc5febcc05d1b4b0c43648141d287ffb1183a4774398"
+    },
+    {
+      "id": "quantum-slh-dsa-keypair-0",
+      "description": "slh-dsa-shake-128s keypair from the key_index=0 quantum seed (SHA-256 of the secret and public key bytes)",
+      "master_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "algorithm": "slh-dsa-shake-128s",
+      "key_index": 0,
+      "secret_key_length": 64,
+      "public_key_length": 32,
+      "secret_key_sha256": "ef4b818c507b4fd6032fae7869da97b342fcc02c94684130f618e970c24f557f",
+      "public_key_sha256": "ad0a741647d804cf874383711bfd40f160de83eb5358a01eb3537516967cb171"
+    },
+    {
+      "id": "quantum-ml-kem-keypair-0",
+      "description": "ml-kem-768 keypair from the key_index=0 quantum seed (SHA-256 of the secret and public key bytes)",
+      "master_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "algorithm": "ml-kem-768",
+      "key_index": 0,
+      "secret_key_length": 2400,
+      "public_key_length": 1184,
+      "secret_key_sha256": "178398d4011a1980ae6f728b1b6aeb627baf178c890c88f9e2a62368f6799910",
+      "public_key_sha256": "3076f45cfe6fa61a5bdc03139dedd8ac103b0ae9531f0d858dc45479565a7d11"
+    },
+    {
+      "id": "quantum-hybrid-dsa-keypair-0",
+      "description": "hybrid-dsa-65 keypair from the key_index=0 quantum seed (SHA-256 of the secret and public key bytes)",
+      "master_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "algorithm": "hybrid-dsa-65",
+      "key_index": 0,
+      "secret_key_length": 4096,
+      "public_key_length": 1984,
+      "secret_key_sha256": "cefe25344329c864e69990a278251fccea7c9809fa3a598ee4c77062309fefc5",
+      "public_key_sha256": "eee2b93f43ae74801d90fec51b9d003ac792c93457ef9e9db801b00f5aa12dd0"
+    },
+    {
+      "id": "quantum-hybrid-kem-keypair-0",
+      "description": "hybrid-kem-768 keypair from the key_index=0 quantum seed (SHA-256 of the secret and public key bytes)",
+      "master_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "algorithm": "hybrid-kem-768",
+      "key_index": 0,
+      "secret_key_length": 2432,
+      "public_key_length": 1216,
+      "secret_key_sha256": "0954cd2c1bd72be8d9bbc8bb80e61beab0f448836f25a3efb768adcc4e5a179f",
+      "public_key_sha256": "8ce7354b906ce4e78a85837bbcd81dfbbb7f9c7e8d7421ca8e66216771dbf04c"
+    }
   ]
 }

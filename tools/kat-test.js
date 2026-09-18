@@ -98,5 +98,23 @@ for (const vector of kat.quantum_seed_derivation || []) {
   assert(derived.length === vector.seed_length, `${vector.id}: quantum seed length`);
 }
 
+// Post-quantum keypairs: the keypair each published quantum seed expands to
+// (SHA-256 of the secret and public key bytes) must match Python exactly,
+// so a change of keygen backend on either side cannot alter a derived key.
+function sha256Hex(bytes) {
+  return crypto.createHash("sha256").update(Buffer.from(bytes)).digest("hex");
+}
+
+for (const vector of kat.quantum_keypair || []) {
+  const master = Uint8Array.from(Buffer.from(vector.master_key_hex, "hex"));
+  const pair = uqs.generateQuantumKeypair(master, vector.algorithm, vector.key_index);
+  const sk = pair.sk !== undefined ? pair.sk : pair.dk;
+  const pk = pair.pk !== undefined ? pair.pk : pair.ek;
+  assert(sk.length === vector.secret_key_length, `${vector.id}: secret key length`);
+  assert(pk.length === vector.public_key_length, `${vector.id}: public key length`);
+  assert(sha256Hex(sk) === vector.secret_key_sha256, `${vector.id}: secret key`);
+  assert(sha256Hex(pk) === vector.public_key_sha256, `${vector.id}: public key`);
+}
+
 console.log(`UQS seed KATs: ${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
