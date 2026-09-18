@@ -10,6 +10,21 @@
 //   Decapsulation key (DK): 2,400 bytes
 //   Ciphertext:             1,088 bytes
 //   Shared secret:             32 bytes
+//
+// Constant-time hardening (mirrors the Python reference):
+//   Every operation on secret-dependent coefficients (the secret vector s,
+//   the CBD noise, the decrypted pre-key m' and its re-encryption) is
+//   branch-free and division-free. Reductions mod q use a fixed-point
+//   Barrett multiply evaluated entirely in int32 with Math.imul, followed
+//   by a masked conditional subtraction; the compress rounding uses the
+//   same quotient estimate plus a masked +1. The JS modulo and division
+//   operators compile to hardware division in the interpreter and baseline
+//   tiers (data-dependent latency on many cores) and ByteEncode's per-bit
+//   "if" was a branch on every bit of m', so neither appears on a secret
+//   path any more.
+//   Only public data may still branch: SampleNTT rejection-samples the
+//   matrix from rho, which is part of the public encapsulation key, and the
+//   zeta table is computed once from constants.
 
 const { sha3_256, sha3_512, shake128, shake256, shake128Xof } = require("./sha3");
 
@@ -40,7 +55,9 @@ function bitrev7(n) {
 // Primitive 512th root of unity: 17
 const ROOT = 17;
 
-// Precompute 128 zetas in bit-reversed order
+// Precompute 128 zetas in bit-reversed order (public constants, computed
+// once at load time; the modulo operator is acceptable here because
+// nothing is secret).
 function modpow(base, exp, mod) {
   let result = 1;
   base = ((base % mod) + mod) % mod;
@@ -60,7 +77,49 @@ for (let i = 0; i < 128; i++) {
 // 128^{-1} mod 3329 = 3303
 const N_INV = modpow(128, Q - 2, Q);
 
+// ── Constant-time arithmetic ─────────────────────────────────────
+//
+// Barrett constant: floor(2^25 / q) = 10079 (10079 * 3329 = 33,552,991,
+// just below 2^25 = 33,554,432). For 0 <= x < 2^24 the estimate
+// t = floor(x * 10079 / 2^25) is either floor(x / q) or one less, so
+// x - t*q lies in [0, 2q) and one masked subtraction finishes the job.
+//
+// x * 10079 does not fit in int32, so the product is split at bit 12:
+//   x = xh * 2^12 + xl
+//   floor(x * 10079 / 2^25) = floor((xh*10079 + floor(xl*10079 / 2^12)) / 2^13)
+// (nested floors by powers of two compose exactly). Both partial products
+// stay below 2^26, so Math.imul and the unsigned shifts are exact.
+//
+// Every caller keeps its argument inside [0, 2^24): products of two
+// residues are below q^2 < 2^24, sums of two residues are below 2q, and
+// the compress numerator x*2^d + q/2 is below 2^22.
+
+const BARRETT_MULT = 10079;
+
+function barrettQuotient(x) {
+  const xh = x >>> 12;
+  const xl = x & 0xfff;
+  return (Math.imul(xh, BARRETT_MULT) + (Math.imul(xl, BARRETT_MULT) >>> 12)) >>> 13;
+}
+
+// x mod q for 0 <= x < 2^24. No division, no branch.
+function ctModQ(x) {
+  const t = barrettQuotient(x);
+  const r = x - Math.imul(t, Q);         // in [0, 2q)
+  return r - (Q & ((Q - 1 - r) >> 31));  // subtract q exactly when r >= q
+}
+
+// floor(x / q) for 0 <= x < 2^22. No division, no branch.
+function ctDivQ(x) {
+  const t = barrettQuotient(x);
+  const r = x - Math.imul(t, Q);         // in [0, 2q)
+  return t + ((Q - 1 - r) >>> 31);       // +1 exactly when r >= q
+}
+
 // ── Polynomial arithmetic ────────────────────────────────────────
+// All coefficients are kept in [0, q). Inputs to ntt/nttInv/multiplyNtts/
+// polyAdd/polySub are residues, so every intermediate stays inside the
+// ctModQ domain.
 
 function ntt(f) {
   const a = Int32Array.from(f);
@@ -69,9 +128,9 @@ function ntt(f) {
     for (let start = 0; start < 256; start += 2 * len) {
       const zeta = ZETAS[k++];
       for (let j = start; j < start + len; j++) {
-        const t = (zeta * a[j + len]) % Q;
-        a[j + len] = (a[j] - t + Q) % Q;
-        a[j] = (a[j] + t) % Q;
+        const t = ctModQ(Math.imul(zeta, a[j + len]));
+        a[j + len] = ctModQ(a[j] + Q - t);
+        a[j] = ctModQ(a[j] + t);
       }
     }
   }
@@ -86,19 +145,24 @@ function nttInv(f) {
       const zeta = ZETAS[k--];
       for (let j = start; j < start + len; j++) {
         const t = a[j];
-        a[j] = (t + a[j + len]) % Q;
-        a[j + len] = (zeta * ((a[j + len] - t + Q) % Q)) % Q;
+        a[j] = ctModQ(t + a[j + len]);
+        a[j + len] = ctModQ(Math.imul(zeta, ctModQ(a[j + len] + Q - t)));
       }
     }
   }
-  for (let i = 0; i < 256; i++) a[i] = (a[i] * N_INV) % Q;
+  for (let i = 0; i < 256; i++) a[i] = ctModQ(Math.imul(a[i], N_INV));
   return a;
 }
 
+// Intermediate products are reduced before they are combined so that every
+// sum handed to ctModQ stays below 2q (the same shape as the Python port).
 function basecasemultiply(a0, a1, b0, b1, gamma) {
-  const c0 = (a0 * b0 + a1 * b1 * gamma) % Q;
-  const c1 = (a0 * b1 + a1 * b0) % Q;
-  return [((c0 % Q) + Q) % Q, ((c1 % Q) + Q) % Q];
+  const c0 = ctModQ(
+    ctModQ(Math.imul(a0, b0))
+    + ctModQ(Math.imul(ctModQ(Math.imul(a1, b1)), gamma))
+  );
+  const c1 = ctModQ(ctModQ(Math.imul(a0, b1)) + ctModQ(Math.imul(a1, b0)));
+  return [c0, c1];
 }
 
 function multiplyNtts(f, g) {
@@ -107,7 +171,8 @@ function multiplyNtts(f, g) {
     const z0 = ZETAS[64 + i];
     const [c0, c1] = basecasemultiply(f[4*i], f[4*i+1], g[4*i], g[4*i+1], z0);
     h[4*i] = c0; h[4*i+1] = c1;
-    const [c2, c3] = basecasemultiply(f[4*i+2], f[4*i+3], g[4*i+2], g[4*i+3], (Q - z0) % Q);
+    // Second pair: gamma = -zeta (public constant, negated mod q)
+    const [c2, c3] = basecasemultiply(f[4*i+2], f[4*i+3], g[4*i+2], g[4*i+3], ctModQ(Q - z0));
     h[4*i+2] = c2; h[4*i+3] = c3;
   }
   return h;
@@ -115,27 +180,30 @@ function multiplyNtts(f, g) {
 
 function polyAdd(a, b) {
   const c = new Int32Array(256);
-  for (let i = 0; i < 256; i++) c[i] = (a[i] + b[i]) % Q;
+  for (let i = 0; i < 256; i++) c[i] = ctModQ(a[i] + b[i]);
   return c;
 }
 
 function polySub(a, b) {
   const c = new Int32Array(256);
-  for (let i = 0; i < 256; i++) c[i] = (a[i] - b[i] + Q) % Q;
+  // Add q before subtracting so the argument stays non-negative.
+  for (let i = 0; i < 256; i++) c[i] = ctModQ(a[i] + Q - b[i]);
   return c;
 }
 
 // ── Byte encoding / decoding ────────────────────────────────────
 
+// FIPS 203 Algorithm 5: ByteEncode_d. The branch on d is on a public
+// parameter; the bit packing itself is unconditional so no control flow
+// depends on the (possibly secret) coefficient values.
 function byteEncode(f, d) {
-  const m = d < 12 ? (1 << d) : Q;
-  const totalBits = 256 * d;
-  const out = new Uint8Array(Math.ceil(totalBits / 8));
+  const mask = (1 << d) - 1;
+  const out = new Uint8Array(32 * d);
   let bitIdx = 0;
   for (let i = 0; i < 256; i++) {
-    let val = ((f[i] % m) + m) % m;
+    let val = d === 12 ? ctModQ(f[i]) : (f[i] & mask);
     for (let j = 0; j < d; j++) {
-      if (val & 1) out[bitIdx >> 3] |= 1 << (bitIdx & 7);
+      out[bitIdx >> 3] |= (val & 1) << (bitIdx & 7);
       val >>= 1;
       bitIdx++;
     }
@@ -143,8 +211,9 @@ function byteEncode(f, d) {
   return out;
 }
 
+// FIPS 203 Algorithm 6: ByteDecode_d. For d < 12 the value already has
+// exactly d bits; for d = 12 it is reduced mod q.
 function byteDecode(data, d) {
-  const m = d < 12 ? (1 << d) : Q;
   const f = new Int32Array(256);
   for (let i = 0; i < 256; i++) {
     let val = 0;
@@ -153,13 +222,16 @@ function byteDecode(data, d) {
       const bit = (data[bitIdx >> 3] >> (bitIdx & 7)) & 1;
       val |= bit << j;
     }
-    f[i] = val % m;
+    f[i] = d === 12 ? ctModQ(val) : val;
   }
   return f;
 }
 
 // ── Sampling ─────────────────────────────────────────────────────
 
+// FIPS 203 Algorithm 7: SampleNTT. Rejection sampling on public randomness
+// (rho is part of the encapsulation key), so the data-dependent loop count
+// leaks nothing secret.
 function sampleNtt(seed, row, col) {
   const xofInput = new Uint8Array(seed.length + 2);
   xofInput.set(seed);
@@ -189,9 +261,12 @@ function sampleNtt(seed, row, col) {
   return coeffs;
 }
 
+// FIPS 203 Algorithm 8: SamplePolyCBD_eta on secret PRF output. Bit
+// extraction is unconditional and indexed by public positions; the
+// centered difference is offset by q so the reduction argument stays
+// non-negative.
 function sampleCbd(data, eta) {
   const f = new Int32Array(256);
-  // Unpack bits
   const bits = new Uint8Array(data.length * 8);
   for (let i = 0; i < data.length; i++) {
     for (let j = 0; j < 8; j++) {
@@ -204,21 +279,24 @@ function sampleCbd(data, eta) {
       aSum += bits[2 * i * eta + j];
       bSum += bits[2 * i * eta + eta + j];
     }
-    f[i] = (aSum - bSum + Q) % Q;
+    f[i] = ctModQ(aSum + Q - bSum);
   }
   return f;
 }
 
 // ── Compression / decompression ──────────────────────────────────
 
+// Compress_d(x) = round(2^d / q * x) mod 2^d for x in [0, q). The numerator
+// x*2^d + q/2 is below 2^22 for d <= 10, inside the ctDivQ domain.
 function compress(x, d) {
   const m = 1 << d;
-  return Math.floor((x * m + Math.floor(Q / 2)) / Q) % m;
+  return ctDivQ((x << d) + (Q >> 1)) & (m - 1);
 }
 
+// Decompress_d(y) = round(q / 2^d * y): division by 2^d is a shift.
 function decompress(y, d) {
   const m = 1 << d;
-  return Math.floor((y * Q + Math.floor(m / 2)) / m);
+  return (Math.imul(y, Q) + (m >> 1)) >> d;
 }
 
 function compressPoly(f, d) {
@@ -580,4 +658,7 @@ module.exports = {
   DK_SIZE,
   CT_SIZE,
   SS_SIZE,
+  // Constant-time reduction helpers, exported for exhaustive tests only.
+  _ctModQ: ctModQ,
+  _ctDivQ: ctDivQ,
 };

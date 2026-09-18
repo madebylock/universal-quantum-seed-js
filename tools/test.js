@@ -255,6 +255,80 @@ section("ML-KEM-768");
   console.log("  ML-KEM-768 round-trip: OK");
 })();
 
+(() => {
+  // The secret path (s, the CBD noise, the decrypted pre-key m' and its
+  // re-encryption) must not reach hardware division or branch on
+  // coefficient bits. The int32 Barrett helpers replace "%" and "/" and
+  // must agree with them on their whole input domains.
+  const mlKemInternal = require("../crypto/ml_kem");
+  let modOk = true;
+  for (let x = 0; x < (1 << 24) && modOk; x++) modOk = mlKemInternal._ctModQ(x) === x % 3329;
+  assert(modOk, "ctModQ should equal x % q on [0, 2^24)");
+  let divOk = true;
+  for (let x = 0; x < (1 << 22) && divOk; x++) divOk = mlKemInternal._ctDivQ(x) === Math.floor(x / 3329);
+  assert(divOk, "ctDivQ should equal floor(x / q) on [0, 2^22)");
+
+  const mlKemSrc = fs.readFileSync(path.join(__dirname, "../crypto/ml_kem.js"), "utf8");
+  const code = mlKemSrc
+    .split("\n").map((line) => line.split("//")[0]).join("\n")
+    .replace(/"[^"\n]*"/g, '""');
+  const modpowStart = code.indexOf("function modpow(");
+  const modpowEnd = code.indexOf("\n}\n", modpowStart);
+  const outsideModpow = code.slice(0, modpowStart) + code.slice(modpowEnd);
+  assert(modpowStart > 0 && modpowEnd > modpowStart, "ml_kem should keep modpow for the public zeta table");
+  assert(!outsideModpow.includes("%"), "ml_kem should not use % outside the public zeta setup");
+  assert(!outsideModpow.includes("/"), "ml_kem should not use / outside the public zeta setup");
+  assert(!code.includes("Math.floor("), "ml_kem should not use Math.floor");
+  assert(!code.includes("if (val & 1)"), "ByteEncode must not branch on coefficient bits");
+  assert(code.includes("out[bitIdx >> 3] |= (val & 1) << (bitIdx & 7);"), "ByteEncode packs bits unconditionally");
+
+  // NIST ACVP ML-KEM-768 keyGen tcId 26 (d || z -> ek), the vector the
+  // Python package pins in tools/test.py; the ek is compared by digest.
+  const seed26 = new Uint8Array(64);
+  seed26.set(Buffer.from("a2b4bca315a6ea4600b4a316e09a2578aa1e8bce919c8df3a96c71c843f5b38b", "hex"));
+  seed26.set(Buffer.from("d6bf055cb7b375e3271ed131f1ba31f83fef533a239878a71074578b891265d1", "hex"), 32);
+  const pair26 = crypto.mlKemKeygen(seed26);
+  assert(
+    Buffer.from(crypto.sha256(pair26.ek)).toString("hex")
+      === "ed2430c8bd81af5cb02a8968db7319bf6e62d0a9a0c9492015610c209b5b3b15",
+    "ACVP keyGen 26 ek should match"
+  );
+  const enc26 = crypto.mlKemEncaps(pair26.ek);
+  assert(constantTimeEqual(crypto.mlKemDecaps(pair26.dk, enc26.ct), enc26.ss), "ACVP keyGen 26 round trip");
+
+  // Cross-implementation vector shared with the Python reference
+  // (universal-quantum-seed/tools/test.py _KAT_*): seed 0..63, randomness 32..63.
+  const seedKat = new Uint8Array(64);
+  for (let i = 0; i < 64; i++) seedKat[i] = i;
+  const rndKat = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) rndKat[i] = 32 + i;
+  const pairKat = crypto.mlKemKeygen(seedKat);
+  assert(
+    Buffer.from(crypto.sha256(pairKat.ek)).toString("hex")
+      === "0b7934c83125c788995e2ba6bd761e33046b3e40571be53e023309a29f398cc9",
+    "Python KAT ek should match"
+  );
+  assert(
+    Buffer.from(crypto.sha256(pairKat.dk)).toString("hex")
+      === "dac268bde6a8dd238e9887117d6b664e7a7a9350ad6b7c08a948e504809572a5",
+    "Python KAT dk should match"
+  );
+  const encKat = crypto.mlKemEncaps(pairKat.ek, rndKat);
+  assert(
+    Buffer.from(encKat.ss).toString("hex")
+      === "dfa3d17135b0c7cad38cd14d75cf05753c4060f4fff1b4df961f2774c7aa051b",
+    "Python KAT shared secret should match"
+  );
+  assert(
+    Buffer.from(crypto.sha256(encKat.ct)).toString("hex")
+      === "1d3fc60ee5c1d56e6d65a6e453e4d17072d97b3f4c88c4939fe44573e29b1c98",
+    "Python KAT ciphertext should match"
+  );
+  assert(constantTimeEqual(crypto.mlKemDecaps(pairKat.dk, encKat.ct), encKat.ss), "Python KAT round trip");
+
+  console.log("  ML-KEM-768 constant-time arithmetic + vectors: OK");
+})();
+
 // ── Hybrid DSA ────────────────────────────────────────────────────
 
 section("Hybrid Ed25519 + ML-DSA-65");
