@@ -461,7 +461,7 @@ def main():
     bundle = build()
 
     out_path = os.path.join(DIST, "uqs-crypto.js")
-    with open(out_path, "w", encoding="utf-8") as f:
+    with open(out_path, "w", encoding="utf-8", newline="\n") as f:
         f.write(bundle)
 
     size_kb = os.path.getsize(out_path) / 1024
